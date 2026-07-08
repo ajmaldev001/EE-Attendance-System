@@ -4,6 +4,66 @@ const bcrypt = require('bcryptjs');
 const SUBJECTS = ['Digital Electronics', 'Signals & Systems', 'Microprocessors', 'Communication', 'VLSI Design'];
 const MARK_TYPES = ['Internal 1', 'Internal 2', 'Assignment', 'Semester'];
 
+// Official class roster: [reg_no, name]
+const STUDENTS = [
+  ['714024169001', 'Abirami'],
+  ['714024169002', 'AJAIKUMAR G'],
+  ['714024169003', 'ANAND K'],
+  ['714024169004', 'ASHWIN S'],
+  ['714024169005', 'DARSHAN R A'],
+  ['714024169006', 'DHARANEESH A M'],
+  ['714024169007', 'DHIVYA G B'],
+  ['714024169008', 'GOKUL P'],
+  ['714024169009', 'HARINI D'],
+  ['714024169010', 'HARINI K S'],
+  ['714024169011', 'JAI ADITYA T'],
+  ['714024169012', 'JAIABINAV T'],
+  ['714024169013', 'JITHIN RIO R'],
+  ['714024169014', 'KAMALESH V K'],
+  ['714024169015', 'KAVIESHWARA M'],
+  ['714024169016', 'KAVYA M'],
+  ['714024169017', 'KIRUTHIKA S'],
+  ['714024169018', 'MANOVA M'],
+  ['714024169019', 'MIRUTHULA S'],
+  ['714024169020', 'MOHAMED JAIM M'],
+  ['714024169021', 'MOHAMMED AYMAN M'],
+  ['714024169022', 'MONIKA M'],
+  ['714024169023', 'MUKILAN R'],
+  ['714024169024', 'NITHIKKANNAN JS'],
+  ['714024169025', 'NITIN K R'],
+  ['714024169026', 'PRATHEEP D'],
+  ['714024169027', 'PRITHIKA P'],
+  ['714024169028', 'PUGAAZHENDHI S'],
+  ['714024169029', 'RAGHUL VASUN V T'],
+  ['714024169030', 'RAHUL PRASATH S'],
+  ['714024169031', 'RETHIKA S'],
+  ['714024169032', 'ROOBASHRI S'],
+  ['714024169033', 'SAKTHISHREE D'],
+  ['714024169034', 'SANJEEV G H'],
+  ['714024169035', 'SANJEYKRISHNA V'],
+  ['714024169036', 'SANKAMES V S'],
+  ['714024169037', 'SANTHOSH KUMAR S'],
+  ['714024169038', 'SASMITHA S P'],
+  ['714024169039', 'SHANMATHI S'],
+  ['714024169040', 'SOORYA VELAA P'],
+  ['714024169041', 'SRI VATSAN P'],
+  ['714024169042', 'SRIRAM M R'],
+  ['714024169043', 'SUBHASHINI N'],
+  ['714024169044', 'SUBIKSHA L'],
+  ['714024169045', 'SUMAN S'],
+  ['714024169046', 'SWETHA R'],
+  ['714024169047', 'THARUN M'],
+  ['714024169048', 'THARUN R'],
+  ['714024169049', 'THARUN R M'],
+  ['714024169050', 'THIRUMURUGAN S'],
+  ['714024169051', 'UDHAYA R'],
+  ['714024169052', 'VARSHA V R'],
+  ['714024169053', 'WINSTON CHURCHIL'],
+  ['714024169054', 'YOGESH S'],
+  ['714024169301', 'ABHISHEK P'],
+  ['714024169302', 'KAUSHIK R'],
+];
+
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
   console.error('❌ DATABASE_URL is not set. Point it at your Postgres (e.g. Supabase) connection string.');
@@ -96,43 +156,14 @@ async function seedIfEmpty() {
 
   const studentCount = Number((await one('SELECT COUNT(*)::int AS c FROM students')).c);
   if (studentCount === 0) {
-    const names = ['Aarav Sharma', 'Priya Nair', 'Rohan Das', 'Sneha Iyer', 'Karthik Reddy',
-      'Ananya Menon', 'Vikram Singh', 'Divya Rao', 'Arjun Pillai', 'Meera Joshi'];
     const studentPw = bcrypt.hashSync('Student@123', 10);
-    const ids = [];
-    for (let i = 0; i < names.length; i++) {
-      const reg = '22ECE' + String(i + 1).padStart(3, '0');
-      const email = names[i].split(' ')[0].toLowerCase() + '@ece.edu';
-      const row = await one(
-        'INSERT INTO students (name, reg_no, semester, email, password_hash) VALUES ($1,$2,$3,$4,$5) RETURNING id',
-        [names[i], reg, 5, email, studentPw]);
-      ids.push(row.id);
+    for (const [reg, name] of STUDENTS) {
+      const email = name.split(' ')[0].toLowerCase() + '@eevlsi.edu';
+      await pool.query(
+        'INSERT INTO students (name, reg_no, semester, email, password_hash) VALUES ($1,$2,$3,$4,$5)',
+        [name, reg, 5, email, studentPw]);
     }
-
-    // Sample attendance: last 6 days x each subject
-    for (let d = 6; d >= 1; d--) {
-      const date = new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
-      for (const sub of SUBJECTS) {
-        const ses = await one('INSERT INTO attendance_sessions (date, subject) VALUES ($1,$2) RETURNING id', [date, sub]);
-        for (let idx = 0; idx < ids.length; idx++) {
-          const r = Math.random();
-          const status = idx === 3 && r < 0.5 ? 'absent' : r < 0.08 ? 'absent' : r < 0.14 ? 'od' : 'present';
-          await pool.query('INSERT INTO attendance_records (session_id, student_id, status) VALUES ($1,$2,$3)', [ses.id, ids[idx], status]);
-        }
-      }
-    }
-
-    // Sample marks
-    for (const sid of ids) {
-      for (const sub of SUBJECTS) {
-        for (const type of MARK_TYPES) {
-          const max = type === 'Semester' ? 100 : type === 'Assignment' ? 20 : 50;
-          const obtained = Math.round((0.5 + Math.random() * 0.5) * max);
-          await pool.query('INSERT INTO marks (student_id, subject, type, obtained, max) VALUES ($1,$2,$3,$4,$5)', [sid, sub, type, obtained, max]);
-        }
-      }
-    }
-    console.log('🌱 Seeded admin, staff, and 10 sample students.');
+    console.log(`🌱 Seeded admin, staff, and ${STUDENTS.length} students.`);
   }
 }
 
@@ -141,4 +172,4 @@ async function init() {
   await seedIfEmpty();
 }
 
-module.exports = { pool, q, one, tx, init, SUBJECTS, MARK_TYPES };
+module.exports = { pool, q, one, tx, init, SUBJECTS, MARK_TYPES, STUDENTS };

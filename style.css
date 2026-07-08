@@ -127,10 +127,11 @@ textarea:focus-visible,
 }
 .brand { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-2) var(--sp-6); }
 .brand-logo {
-  width: 42px; height: 42px; border-radius: var(--r-md);
+  min-width: 42px; height: 42px; padding: 0 12px; border-radius: var(--r-md);
   background: linear-gradient(135deg, var(--primary), #8b5cf6);
-  color: #fff; font-weight: 800; font-size: 15px;
-  display: grid; place-items: center; letter-spacing: .5px;
+  color: #fff; font-weight: 800; font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  letter-spacing: .5px; white-space: nowrap;
   box-shadow: 0 4px 12px var(--primary-ring);
 }
 .brand-text h1 { font-size: 16px; font-weight: 700; }
@@ -355,7 +356,7 @@ tbody tr:hover { background: var(--surface-2); }
   animation: modal-in .3s var(--ease);
 }
 .login-brand { text-align: center; margin-bottom: var(--sp-6); }
-.login-brand .brand-logo { width: 56px; height: 56px; font-size: 18px; border-radius: var(--r-lg); margin: 0 auto var(--sp-3); }
+.login-brand .brand-logo { height: 56px; padding: 0 20px; font-size: 17px; border-radius: var(--r-lg); margin: 0 auto var(--sp-3); }
 .login-brand h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
 .login-brand p { color: var(--text-soft); font-size: 14px; margin-top: var(--sp-1); }
 .role-toggle { display: flex; gap: var(--sp-1); background: var(--surface-2); padding: 4px; border-radius: var(--r-md); margin-bottom: var(--sp-6); border: 1px solid var(--border); }

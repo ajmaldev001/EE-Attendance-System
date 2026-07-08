@@ -202,7 +202,7 @@ function studentForm(id) {
   openModal(id ? 'Edit Student' : 'Add Student', `
     <div class="field"><label>Full Name</label><input id="f_name" value="${esc(s.name)}" placeholder="e.g. Priya Kumar" /></div>
     <div class="field-row">
-      <div class="field"><label>Register No</label><input id="f_reg" value="${esc(s.reg)}" placeholder="22ECE001" /></div>
+      <div class="field"><label>Register No</label><input id="f_reg" value="${esc(s.reg)}" placeholder="714024169001" /></div>
       <div class="field"><label>Semester</label><select id="f_sem">${[1,2,3,4,5,6,7,8].map(n => `<option ${n==s.sem?'selected':''}>${n}</option>`).join('')}</select></div>
     </div>
     <div class="field"><label>Email</label><input id="f_email" value="${esc(s.email||'')}" placeholder="student@ece.edu" /></div>
@@ -463,13 +463,13 @@ let loginRole = 'staff';
 
 const HINTS = {
   staff: 'Demo — Admin: <b>admin@ece.edu / Admin@123</b><br>Staff: <b>staff@ece.edu / Staff@123</b>',
-  student: 'Demo — Register No: <b>22ECE001</b> … <b>22ECE010</b><br>Password: <b>Student@123</b>',
+  student: 'Register No: <b>714024169001</b> … <b>714024169054</b><br>Password: <b>Student@123</b>',
 };
 function setLoginRole(role) {
   loginRole = role;
   $$('.role-btn').forEach(b => b.classList.toggle('active', b.dataset.role === role));
   $('#idLabel').textContent = role === 'student' ? 'Register Number' : 'Email';
-  $('#loginId').placeholder = role === 'student' ? '22ECE001' : 'admin@ece.edu';
+  $('#loginId').placeholder = role === 'student' ? '714024169001' : 'admin@ece.edu';
   $('#loginHint').innerHTML = HINTS[role];
 }
 $$('.role-btn').forEach(b => b.onclick = () => setLoginRole(b.dataset.role));
