@@ -258,6 +258,12 @@ app.use(express.static(path.join(__dirname, '..')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'index.html')));
 
 /* ================= STARTUP ================= */
-init()
-  .then(() => app.listen(PORT, () => console.log(`✅ Attendance server running at http://localhost:${PORT}`)))
-  .catch(err => { console.error('❌ Failed to initialize database:', err.message); process.exit(1); });
+// Bind the port FIRST so the host (Render) detects an open port immediately,
+// then initialize the database. If init were awaited before listen, a slow or
+// hanging DB connection would prevent the port from ever opening.
+app.listen(PORT, () => {
+  console.log(`✅ Attendance server listening on port ${PORT}`);
+  init()
+    .then(() => console.log('✅ Database initialized'))
+    .catch(err => console.error('❌ Database init failed:', err.message));
+});

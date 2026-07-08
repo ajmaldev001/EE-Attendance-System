@@ -14,6 +14,8 @@ const isLocal = /localhost|127\.0\.0\.1/.test(connectionString || '');
 const pool = new Pool({
   connectionString,
   ssl: isLocal ? false : { rejectUnauthorized: false },
+  // Fail fast instead of hanging if the DB is unreachable, so errors surface in logs.
+  connectionTimeoutMillis: 10000,
 });
 
 /* ---------- query helpers ---------- */
