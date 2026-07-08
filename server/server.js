@@ -2,7 +2,7 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
-const { db, SUBJECTS, MARK_TYPES } = require('./db');
+const { pool, q, one, tx, init, SUBJECTS, MARK_TYPES } = require('./db');
 const { signToken, authenticate, requireRole } = require('./auth');
 
 const app = express();
@@ -11,11 +11,15 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+/* small async wrapper so thrown errors return JSON 500 instead of crashing */
+const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch(err => {
+  console.error(err);
+  res.status(500).json({ error: err.message || 'Server error' });
+});
+
 /* ---------- Query helpers ---------- */
-function attendanceStats(studentId) {
-  const rows = db.prepare(`
-    SELECT status, COUNT(*) AS c FROM attendance_records WHERE student_id = ? GROUP BY status
-  `).all(studentId);
+async function attendanceStats(studentId) {
+  const rows = await q('SELECT status, COUNT(*)::int AS c FROM attendance_records WHERE student_id = $1 GROUP BY status', [studentId]);
   let present = 0, absent = 0, od = 0;
   rows.forEach(r => { if (r.status === 'present') present = r.c; else if (r.status === 'od') od = r.c; else absent = r.c; });
   const total = present + absent + od;
@@ -23,8 +27,8 @@ function attendanceStats(studentId) {
   return { total, present, absent, od, pct };
 }
 
-function studentAvgMark(studentId) {
-  const rows = db.prepare('SELECT obtained, max FROM marks WHERE student_id = ?').all(studentId);
+async function studentAvgMark(studentId) {
+  const rows = await q('SELECT obtained, max FROM marks WHERE student_id = $1', [studentId]);
   if (!rows.length) return null;
   const avg = rows.reduce((a, m) => a + (m.obtained / m.max) * 100, 0) / rows.length;
   return Math.round(avg);
@@ -42,193 +46,191 @@ function publicStudent(s) {
 /* ================= AUTH ================= */
 app.get('/api/meta', (req, res) => res.json({ subjects: SUBJECTS, markTypes: MARK_TYPES }));
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', wrap(async (req, res) => {
   const { role, identifier, password } = req.body || {};
   if (!identifier || !password) return res.status(400).json({ error: 'Missing credentials' });
 
   if (role === 'student') {
-    const s = db.prepare('SELECT * FROM students WHERE reg_no = ?').get(identifier.trim());
+    const s = await one('SELECT * FROM students WHERE reg_no = $1', [identifier.trim()]);
     if (!s || !bcrypt.compareSync(password, s.password_hash)) return res.status(401).json({ error: 'Invalid register number or password' });
     const user = { id: s.id, role: 'student', name: s.name, reg: s.reg_no };
     return res.json({ token: signToken(user), user });
   }
-  // staff/admin
-  const u = db.prepare('SELECT * FROM users WHERE email = ?').get(identifier.trim().toLowerCase());
+  const u = await one('SELECT * FROM users WHERE email = $1', [identifier.trim().toLowerCase()]);
   if (!u || !bcrypt.compareSync(password, u.password_hash)) return res.status(401).json({ error: 'Invalid email or password' });
   const user = { id: u.id, role: u.role, name: u.name, email: u.email };
   return res.json({ token: signToken(user), user });
-});
+}));
 
 app.get('/api/me', authenticate, (req, res) => res.json({ user: req.user }));
 
 /* ================= STAFF / ADMIN ================= */
 const staff = [authenticate, requireRole('admin', 'staff')];
 
+async function studentWithStats(s) {
+  return { ...publicStudent(s), stats: await attendanceStats(s.id), avgMark: await studentAvgMark(s.id) };
+}
+
 // Dashboard stats
-app.get('/api/dashboard', staff, (req, res) => {
-  const students = db.prepare('SELECT * FROM students ORDER BY reg_no').all();
-  const sessions = db.prepare('SELECT COUNT(*) AS c FROM attendance_sessions').get().c;
-  const withStats = students.map(s => ({ ...publicStudent(s), stats: attendanceStats(s.id) }));
+app.get('/api/dashboard', staff, wrap(async (req, res) => {
+  const students = await q('SELECT * FROM students ORDER BY reg_no');
+  const sessions = Number((await one('SELECT COUNT(*)::int AS c FROM attendance_sessions')).c);
+  const withStats = await Promise.all(students.map(async s => ({ ...publicStudent(s), stats: await attendanceStats(s.id) })));
   const pcts = withStats.map(s => s.stats.pct);
   const avgAtt = withStats.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / withStats.length) : 0;
   const low = withStats.filter(s => s.stats.total && s.stats.pct < 75);
   let present = 0, absent = 0, od = 0;
-  const totals = db.prepare('SELECT status, COUNT(*) AS c FROM attendance_records GROUP BY status').all();
+  const totals = await q('SELECT status, COUNT(*)::int AS c FROM attendance_records GROUP BY status');
   totals.forEach(r => { if (r.status === 'present') present = r.c; else if (r.status === 'od') od = r.c; else absent = r.c; });
-  res.json({
-    totalStudents: students.length, sessions, avgAtt, low,
-    students: withStats, statusTotals: { present, absent, od }
-  });
-});
+  res.json({ totalStudents: students.length, sessions, avgAtt, low, students: withStats, statusTotals: { present, absent, od } });
+}));
 
 // Students CRUD
-app.get('/api/students', staff, (req, res) => {
-  const rows = db.prepare('SELECT * FROM students ORDER BY reg_no').all();
-  res.json(rows.map(s => ({ ...publicStudent(s), stats: attendanceStats(s.id), avgMark: studentAvgMark(s.id) })));
-});
+app.get('/api/students', staff, wrap(async (req, res) => {
+  const rows = await q('SELECT * FROM students ORDER BY reg_no');
+  res.json(await Promise.all(rows.map(studentWithStats)));
+}));
 
-app.post('/api/students', staff, (req, res) => {
+app.post('/api/students', staff, wrap(async (req, res) => {
   const { name, reg, sem, email, password } = req.body || {};
   if (!name || !reg) return res.status(400).json({ error: 'Name and Register No are required' });
-  const exists = db.prepare('SELECT id FROM students WHERE reg_no = ?').get(reg.trim());
+  const exists = await one('SELECT id FROM students WHERE reg_no = $1', [reg.trim()]);
   if (exists) return res.status(409).json({ error: 'Register No already exists' });
   const pw = bcrypt.hashSync(password && password.length ? password : 'Student@123', 10);
-  const info = db.prepare('INSERT INTO students (name, reg_no, semester, email, password_hash) VALUES (?, ?, ?, ?, ?)')
-    .run(name.trim(), reg.trim(), Number(sem) || 5, (email || '').trim(), pw);
-  res.status(201).json({ id: info.lastInsertRowid });
-});
+  const row = await one('INSERT INTO students (name, reg_no, semester, email, password_hash) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+    [name.trim(), reg.trim(), Number(sem) || 5, (email || '').trim(), pw]);
+  res.status(201).json({ id: row.id });
+}));
 
-app.put('/api/students/:id', staff, (req, res) => {
+app.put('/api/students/:id', staff, wrap(async (req, res) => {
   const { name, reg, sem, email, password } = req.body || {};
-  const s = db.prepare('SELECT * FROM students WHERE id = ?').get(req.params.id);
+  const s = await one('SELECT * FROM students WHERE id = $1', [req.params.id]);
   if (!s) return res.status(404).json({ error: 'Student not found' });
   if (reg) {
-    const dup = db.prepare('SELECT id FROM students WHERE reg_no = ? AND id != ?').get(reg.trim(), s.id);
+    const dup = await one('SELECT id FROM students WHERE reg_no = $1 AND id != $2', [reg.trim(), s.id]);
     if (dup) return res.status(409).json({ error: 'Register No already exists' });
   }
   const pw = password && password.length ? bcrypt.hashSync(password, 10) : s.password_hash;
-  db.prepare('UPDATE students SET name=?, reg_no=?, semester=?, email=?, password_hash=? WHERE id=?')
-    .run(name ?? s.name, (reg ?? s.reg_no).trim(), Number(sem) || s.semester, email ?? s.email, pw, s.id);
+  await pool.query('UPDATE students SET name=$1, reg_no=$2, semester=$3, email=$4, password_hash=$5 WHERE id=$6',
+    [name ?? s.name, (reg ?? s.reg_no).trim(), Number(sem) || s.semester, email ?? s.email, pw, s.id]);
   res.json({ ok: true });
-});
+}));
 
-app.delete('/api/students/:id', staff, (req, res) => {
-  db.prepare('DELETE FROM students WHERE id = ?').run(req.params.id);
+app.delete('/api/students/:id', staff, wrap(async (req, res) => {
+  await pool.query('DELETE FROM students WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
-});
+}));
 
 // Attendance
-app.get('/api/attendance', staff, (req, res) => {
+app.get('/api/attendance', staff, wrap(async (req, res) => {
   const { date, subject } = req.query;
   if (!date || !subject) return res.status(400).json({ error: 'date and subject required' });
-  const session = db.prepare('SELECT id FROM attendance_sessions WHERE date = ? AND subject = ?').get(date, subject);
+  const session = await one('SELECT id FROM attendance_sessions WHERE date = $1 AND subject = $2', [date, subject]);
   const marks = {};
   if (session) {
-    db.prepare('SELECT student_id, status FROM attendance_records WHERE session_id = ?').all(session.id)
+    (await q('SELECT student_id, status FROM attendance_records WHERE session_id = $1', [session.id]))
       .forEach(r => { marks[r.student_id] = r.status; });
   }
   res.json({ exists: !!session, marks });
-});
+}));
 
-app.post('/api/attendance', staff, (req, res) => {
+app.post('/api/attendance', staff, wrap(async (req, res) => {
   const { date, subject, marks } = req.body || {};
   if (!date || !subject || typeof marks !== 'object') return res.status(400).json({ error: 'date, subject, marks required' });
-  const tx = db.transaction(() => {
-    let session = db.prepare('SELECT id FROM attendance_sessions WHERE date = ? AND subject = ?').get(date, subject);
+  await tx(async (client) => {
+    let session = (await client.query('SELECT id FROM attendance_sessions WHERE date = $1 AND subject = $2', [date, subject])).rows[0];
     if (!session) {
-      const info = db.prepare('INSERT INTO attendance_sessions (date, subject) VALUES (?, ?)').run(date, subject);
-      session = { id: info.lastInsertRowid };
+      session = (await client.query('INSERT INTO attendance_sessions (date, subject) VALUES ($1,$2) RETURNING id', [date, subject])).rows[0];
     }
-    const up = db.prepare(`INSERT INTO attendance_records (session_id, student_id, status) VALUES (?, ?, ?)
-      ON CONFLICT(session_id, student_id) DO UPDATE SET status = excluded.status`);
-    Object.entries(marks).forEach(([sid, status]) => {
-      if (['present', 'absent', 'od'].includes(status)) up.run(session.id, Number(sid), status);
-    });
+    for (const [sid, status] of Object.entries(marks)) {
+      if (['present', 'absent', 'od'].includes(status)) {
+        await client.query(
+          `INSERT INTO attendance_records (session_id, student_id, status) VALUES ($1,$2,$3)
+           ON CONFLICT (session_id, student_id) DO UPDATE SET status = EXCLUDED.status`,
+          [session.id, Number(sid), status]);
+      }
+    }
   });
-  tx();
   res.json({ ok: true });
-});
+}));
 
 // Marks
-app.get('/api/marks', staff, (req, res) => {
+app.get('/api/marks', staff, wrap(async (req, res) => {
   const { subject, type } = req.query;
   if (!subject || !type) return res.status(400).json({ error: 'subject and type required' });
-  const rows = db.prepare('SELECT student_id, obtained, max FROM marks WHERE subject = ? AND type = ?').all(subject, type);
+  const rows = await q('SELECT student_id, obtained, max FROM marks WHERE subject = $1 AND type = $2', [subject, type]);
   const map = {};
   rows.forEach(r => { map[r.student_id] = { obtained: r.obtained, max: r.max }; });
   res.json(map);
-});
+}));
 
-app.post('/api/marks', staff, (req, res) => {
+app.post('/api/marks', staff, wrap(async (req, res) => {
   const { subject, type, entries } = req.body || {};
   if (!subject || !type || !Array.isArray(entries)) return res.status(400).json({ error: 'subject, type, entries required' });
-  const tx = db.transaction(() => {
-    const del = db.prepare('DELETE FROM marks WHERE student_id = ? AND subject = ? AND type = ?');
-    const ins = db.prepare('INSERT INTO marks (student_id, subject, type, obtained, max) VALUES (?, ?, ?, ?, ?)');
-    entries.forEach(e => {
-      del.run(e.studentId, subject, type);
+  await tx(async (client) => {
+    for (const e of entries) {
+      await client.query('DELETE FROM marks WHERE student_id = $1 AND subject = $2 AND type = $3', [e.studentId, subject, type]);
       if (e.obtained !== null && e.obtained !== '' && !isNaN(e.obtained)) {
-        ins.run(e.studentId, subject, type, Number(e.obtained), Number(e.max) || 100);
+        await client.query('INSERT INTO marks (student_id, subject, type, obtained, max) VALUES ($1,$2,$3,$4,$5)',
+          [e.studentId, subject, type, Number(e.obtained), Number(e.max) || 100]);
       }
-    });
+    }
   });
-  tx();
   res.json({ ok: true });
-});
+}));
 
 // Reports
-function buildStudentReport(id) {
-  const s = db.prepare('SELECT * FROM students WHERE id = ?').get(id);
+async function buildStudentReport(id) {
+  const s = await one('SELECT * FROM students WHERE id = $1', [id]);
   if (!s) return null;
-  const stats = attendanceStats(id);
-  const subjMarks = SUBJECTS.map(sub => {
-    const ms = db.prepare('SELECT obtained, max FROM marks WHERE student_id = ? AND subject = ?').all(id, sub);
-    if (!ms.length) return { sub, pct: null, grade: null };
+  const stats = await attendanceStats(id);
+  const subjMarks = [];
+  for (const sub of SUBJECTS) {
+    const ms = await q('SELECT obtained, max FROM marks WHERE student_id = $1 AND subject = $2', [id, sub]);
+    if (!ms.length) { subjMarks.push({ sub, pct: null, grade: null }); continue; }
     const pct = Math.round(ms.reduce((a, m) => a + (m.obtained / m.max) * 100, 0) / ms.length);
-    return { sub, pct, grade: gradeFor(pct) };
-  });
-  const history = db.prepare(`
+    subjMarks.push({ sub, pct, grade: gradeFor(pct) });
+  }
+  const history = await q(`
     SELECT ses.date, ses.subject, r.status
     FROM attendance_records r JOIN attendance_sessions ses ON ses.id = r.session_id
-    WHERE r.student_id = ? ORDER BY ses.date DESC, ses.subject
-  `).all(id);
+    WHERE r.student_id = $1 ORDER BY ses.date DESC, ses.subject`, [id]);
   return { student: publicStudent(s), stats, subjMarks, history };
 }
 
-app.get('/api/reports/student/:id', staff, (req, res) => {
-  const report = buildStudentReport(req.params.id);
+app.get('/api/reports/student/:id', staff, wrap(async (req, res) => {
+  const report = await buildStudentReport(req.params.id);
   if (!report) return res.status(404).json({ error: 'Student not found' });
   res.json(report);
-});
+}));
 
-app.get('/api/export/csv', staff, (req, res) => {
-  const students = db.prepare('SELECT * FROM students ORDER BY reg_no').all();
+app.get('/api/export/csv', staff, wrap(async (req, res) => {
+  const students = await q('SELECT * FROM students ORDER BY reg_no');
   const rows = [['Name', 'Reg No', 'Semester', 'Attendance %', 'Present', 'Absent', 'OD', 'Avg Marks %']];
-  students.forEach(s => {
-    const st = attendanceStats(s.id), avg = studentAvgMark(s.id);
+  for (const s of students) {
+    const st = await attendanceStats(s.id), avg = await studentAvgMark(s.id);
     rows.push([s.name, s.reg_no, s.semester, st.pct, st.present, st.absent, st.od, avg ?? '']);
-  });
+  }
   const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="attendance_report.csv"');
   res.send(csv);
-});
+}));
 
 /* ================= STUDENT (own data only) ================= */
 const studentOnly = [authenticate, requireRole('student')];
 
-app.get('/api/me/summary', studentOnly, (req, res) => {
-  const report = buildStudentReport(req.user.id);
+app.get('/api/me/summary', studentOnly, wrap(async (req, res) => {
+  const report = await buildStudentReport(req.user.id);
   if (!report) return res.status(404).json({ error: 'Not found' });
   res.json(report);
-});
+}));
 
-app.get('/api/me/attendance', studentOnly, (req, res) => {
-  const history = db.prepare(`
+app.get('/api/me/attendance', studentOnly, wrap(async (req, res) => {
+  const history = await q(`
     SELECT ses.date, ses.subject, r.status
     FROM attendance_records r JOIN attendance_sessions ses ON ses.id = r.session_id
-    WHERE r.student_id = ? ORDER BY ses.date DESC, ses.subject
-  `).all(req.user.id);
+    WHERE r.student_id = $1 ORDER BY ses.date DESC, ses.subject`, [req.user.id]);
   const bySubject = SUBJECTS.map(sub => {
     const recs = history.filter(h => h.subject === sub);
     let present = 0, absent = 0, od = 0;
@@ -236,11 +238,11 @@ app.get('/api/me/attendance', studentOnly, (req, res) => {
     const total = recs.length, pct = total ? Math.round(((present + od) / total) * 100) : 0;
     return { sub, total, present, absent, od, pct };
   });
-  res.json({ stats: attendanceStats(req.user.id), history, bySubject });
-});
+  res.json({ stats: await attendanceStats(req.user.id), history, bySubject });
+}));
 
-app.get('/api/me/marks', studentOnly, (req, res) => {
-  const rows = db.prepare('SELECT subject, type, obtained, max FROM marks WHERE student_id = ?').all(req.user.id);
+app.get('/api/me/marks', studentOnly, wrap(async (req, res) => {
+  const rows = await q('SELECT subject, type, obtained, max FROM marks WHERE student_id = $1', [req.user.id]);
   const bySubject = SUBJECTS.map(sub => {
     const ms = rows.filter(r => r.subject === sub);
     const byType = {};
@@ -249,10 +251,13 @@ app.get('/api/me/marks', studentOnly, (req, res) => {
     return { sub, byType, pct, grade: pct === null ? null : gradeFor(pct) };
   });
   res.json({ markTypes: MARK_TYPES, bySubject });
-});
+}));
 
 /* ================= STATIC FRONTEND ================= */
 app.use(express.static(path.join(__dirname, '..')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'index.html')));
 
-app.listen(PORT, () => console.log(`✅ Attendance server running at http://localhost:${PORT}`));
+/* ================= STARTUP ================= */
+init()
+  .then(() => app.listen(PORT, () => console.log(`✅ Attendance server running at http://localhost:${PORT}`)))
+  .catch(err => { console.error('❌ Failed to initialize database:', err.message); process.exit(1); });

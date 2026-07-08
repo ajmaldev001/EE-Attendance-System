@@ -1,104 +1,92 @@
-# Deployment Guide — Vercel (frontend) + Fly.io (backend)
+# Deployment Guide — Vercel (frontend) + Render (backend) + Supabase (Postgres)
 
-Your app is split into two deploys:
+100% free, **no credit card required**. Three pieces:
 
 - **Frontend** (`index.html`, `style.css`, `app.js`, `config.js`) → **Vercel**
-- **Backend + SQLite** (`server/`, `Dockerfile`, `fly.toml`) → **Fly.io** (SQLite persists on a volume)
+- **Backend** (`server/`) → **Render** (free web service)
+- **Database** → **Supabase** (free Postgres, data persists)
+
+All three deploy from your GitHub repo: `https://github.com/ajmaldev001/EE-Attendance-System`.
 
 ---
 
 ## 0. Prerequisites (one-time)
 
-1. Create free accounts: [github.com](https://github.com), [vercel.com](https://vercel.com), [fly.io](https://fly.io).
-2. Install the Fly CLI:
-   ```bash
-   brew install flyctl        # macOS
-   fly auth login
-   ```
-3. Push this project to GitHub (both hosts deploy from Git):
-   ```bash
-   cd /Users/ajju/Development/Ajju/AttendanceWebApp
-   git init
-   git add .
-   git commit -m "Attendance app: split frontend/backend for deploy"
-   git branch -M main
-   git remote add origin https://github.com/<you>/attendance-app.git
-   git push -u origin main
-   ```
+Create free accounts (sign in with GitHub for all three):
+- [github.com](https://github.com) · [supabase.com](https://supabase.com) · [render.com](https://render.com) · [vercel.com](https://vercel.com)
+
+Make sure the latest code is pushed:
+```bash
+cd /Users/ajju/Development/Ajju/EE-Attendance-System
+git add -A && git commit -m "Switch backend to Postgres for Render + Supabase" && git push
+```
 
 ---
 
-## 1. Deploy the backend to Fly.io
+## 1. Create the database on Supabase
 
-From the project root:
+1. Go to **supabase.com → New project**. Pick a name, a strong **database password** (save it), and the nearest region. Wait ~2 min for it to provision.
+2. Open **Project Settings → Database → Connection string → URI**.
+3. Copy the **Connection Pooler** URI (recommended for hosted apps). It looks like:
+   ```
+   postgresql://postgres.abcdefgh:[YOUR-PASSWORD]@aws-0-<region>.pooler.supabase.com:6543/postgres
+   ```
+4. Replace `[YOUR-PASSWORD]` with the database password from step 1. This full string is your **`DATABASE_URL`**.
 
-```bash
-cd /Users/ajju/Development/Ajju/AttendanceWebApp
+> Tables + seed data (admin, staff, 10 students, sample attendance/marks) are created **automatically** on the backend's first boot — you don't run any SQL by hand.
 
-# Launch (uses the existing Dockerfile + fly.toml).
-# When prompted: pick a unique app name, your region, and say NO to deploying now.
-fly launch --no-deploy
+---
 
-# Create the persistent volume that holds data.db (1 GB, free tier)
-fly volumes create attendance_data --size 1 --region <your-region>
+## 2. Deploy the backend to Render
 
-# Set a strong JWT secret (do NOT use the dev default)
-fly secrets set JWT_SECRET="$(openssl rand -hex 32)"
-
-# Deploy
-fly deploy
-```
-
-When it finishes, note your backend URL, e.g. **`https://ece-attendance-backend.fly.dev`**.
+1. Go to **render.com → New → Web Service → Build and deploy from a Git repository** and pick your repo.
+2. Render detects `render.yaml`. If it asks manually, set:
+   - **Root Directory:** `server`
+   - **Runtime:** `Node`
+   - **Build Command:** `npm install`
+   - **Start Command:** `node server.js`
+   - **Plan:** `Free`
+3. Under **Environment**, add:
+   - **`DATABASE_URL`** = the Supabase URI from step 1.
+   - **`JWT_SECRET`** = any long random string (or let the blueprint generate it).
+4. Click **Create Web Service**. First build takes ~2–3 min. Watch the logs for:
+   ```
+   🌱 Seeded admin, staff, and 10 sample students.
+   ✅ Attendance API running on http://localhost:10000
+   ```
+5. Note your backend URL, e.g. **`https://ece-attendance-backend.onrender.com`**.
 
 Quick test:
 ```bash
-curl https://<your-app>.fly.dev/api/meta      # → {"subjects":[...],"markTypes":[...]}
+curl https://<your-app>.onrender.com/api/meta   # → {"subjects":[...],"markTypes":[...]}
 ```
-
-> The seed data (admin + 10 students) is created automatically on first boot.
 
 ---
 
-## 2. Point the frontend at the backend
+## 3. Point the frontend at the backend
 
-Edit **`config.js`** and set your Fly URL:
-
+Edit **`config.js`**:
 ```js
-window.API_BASE = 'https://ece-attendance-backend.fly.dev';  // no trailing slash
+window.API_BASE = 'https://ece-attendance-backend.onrender.com';  // your Render URL, no trailing slash
 ```
-
 Commit and push:
 ```bash
-git add config.js && git commit -m "Point frontend at Fly backend" && git push
+git add config.js && git commit -m "Point frontend at Render backend" && git push
 ```
 
 ---
 
-## 3. Deploy the frontend to Vercel
+## 4. Deploy the frontend to Vercel
 
-1. Go to **vercel.com → Add New → Project → Import** your GitHub repo.
-2. In the setup screen:
+1. **vercel.com → Add New → Project → Import** your GitHub repo.
+2. Setup screen:
    - **Framework Preset:** `Other`
-   - **Root Directory:** `./` (leave default)
-   - **Build Command:** leave **empty**
-   - **Output Directory:** leave **empty**
-3. Click **Deploy**.
+   - **Root Directory:** `./`
+   - **Build Command:** leave empty
+   - **Output Directory:** leave empty
+3. Click **Deploy**. Live at something like `https://ee-attendance-system.vercel.app`.
 
-`.vercelignore` already keeps the `server/` folder and `data.db` out of the static deploy.
-
-Your frontend goes live at something like `https://attendance-app.vercel.app`.
-
----
-
-## 4. Allow the Vercel domain (CORS)
-
-CORS is already enabled globally in `server.js` (`app.use(cors())`), so the Vercel domain can call the Fly backend out of the box. To lock it down to only your Vercel URL later, change that line to:
-
-```js
-app.use(cors({ origin: 'https://attendance-app.vercel.app' }));
-```
-then `fly deploy` again.
+`vercel.json` keeps the `server/` folder out of the static deploy. CORS is already enabled globally in `server.js`, so the Vercel domain can call Render out of the box.
 
 ---
 
@@ -107,8 +95,8 @@ then `fly deploy` again.
 | Piece | URL |
 |-------|-----|
 | Frontend | `https://<you>.vercel.app` |
-| Backend API | `https://<you>.fly.dev/api` |
-| Database | SQLite on Fly volume `attendance_data` (persistent) |
+| Backend API | `https://<you>.onrender.com/api` |
+| Database | Supabase Postgres (persistent, free) |
 
 **Login:** Admin `admin@ece.edu / Admin@123` · Staff `staff@ece.edu / Staff@123` · Student `22ECE001 / Student@123`
 
@@ -116,7 +104,8 @@ then `fly deploy` again.
 
 ## Notes & gotchas
 
-- **Free Fly machines auto-sleep** when idle (`auto_stop_machines`). The first request after a nap takes ~1–2 s to wake — normal on free tier.
-- **Backups:** to download the live DB → `fly ssh console -C "cat /data/data.db" > backup.db` (or use `fly ssh sftp get`).
-- **Change the seed password** for admin/staff in `server/db.js` before real use, or change it via the app after first login (add a change-password screen — not built yet).
-- **Redeploy backend:** `fly deploy`. **Redeploy frontend:** just `git push` (Vercel auto-builds).
+- **Render free web services sleep after 15 min idle.** The first request after a nap takes ~30–50 s to wake (cold start). Normal on the free plan; it stays warm while in use.
+- **Supabase free projects pause after ~1 week of zero activity.** Just un-pause from the dashboard if that happens; data is retained.
+- **SSL:** the backend enables SSL automatically for any non-local `DATABASE_URL` (`rejectUnauthorized: false`), which is what Supabase needs.
+- **Change the seed passwords** for admin/staff in `server/db.js` before real use.
+- **Redeploy:** just `git push` — both Render and Vercel auto-build on push to `main`.

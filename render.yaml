@@ -1,0 +1,16 @@
+# Render Blueprint — backend web service (free plan, no card).
+# Database is external (Supabase Postgres). Set DATABASE_URL in the Render dashboard.
+services:
+  - type: web
+    name: ece-attendance-backend
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/meta
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true      # Render generates a strong secret
+      - key: DATABASE_URL
+        sync: false              # paste your Supabase connection string in the dashboard
