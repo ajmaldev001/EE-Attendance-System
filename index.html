@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ECE Attendance & Performance Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body data-theme="light">
+  <!-- Login gate -->
+  <div id="loginScreen" class="login-screen">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="brand-logo">ECE</div>
+        <h1>Attendance Portal</h1>
+        <p>Sign in to continue</p>
+      </div>
+      <div class="role-toggle">
+        <button class="role-btn active" data-role="staff">Staff / Admin</button>
+        <button class="role-btn" data-role="student">Student</button>
+      </div>
+      <form id="loginForm">
+        <div class="field">
+          <label id="idLabel">Email</label>
+          <input id="loginId" autocomplete="username" placeholder="admin@ece.edu" />
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input id="loginPw" type="password" autocomplete="current-password" placeholder="••••••••" />
+        </div>
+        <div id="loginError" class="login-error"></div>
+        <button type="submit" class="btn" style="width:100%">Sign In</button>
+      </form>
+      <div class="login-hint" id="loginHint"></div>
+    </div>
+  </div>
+
+  <div id="app" style="display:none">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-logo">ECE</div>
+        <div class="brand-text">
+          <h1>Attendance</h1>
+          <span>Performance Tracker</span>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="dashboard"><span class="ico">▚</span> Dashboard</button>
+        <button class="nav-item" data-view="students"><span class="ico">☰</span> Students</button>
+        <button class="nav-item" data-view="attendance"><span class="ico">✓</span> Attendance</button>
+        <button class="nav-item" data-view="marks"><span class="ico">✎</span> Marks</button>
+        <button class="nav-item" data-view="reports"><span class="ico">▤</span> Reports</button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="user-chip">
+          <div class="user-avatar" id="userAvatar">U</div>
+          <div class="user-meta">
+            <span class="user-name" id="userName">User</span>
+            <span class="user-role" id="userRole">role</span>
+          </div>
+        </div>
+        <button id="logoutBtn" class="btn-ghost danger">Log Out</button>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <header class="topbar">
+        <button class="menu-toggle" id="menuToggle">☰</button>
+        <h2 id="pageTitle">Dashboard</h2>
+        <div class="topbar-actions">
+          <button id="themeToggle" class="icon-btn" title="Toggle theme">🌙</button>
+        </div>
+      </header>
+      <section class="content" id="content"></section>
+    </main>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal" id="modal">
+      <div class="modal-head">
+        <h3 id="modalTitle">Title</h3>
+        <button class="icon-btn" id="modalClose">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

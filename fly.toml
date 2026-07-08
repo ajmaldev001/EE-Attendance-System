@@ -1,0 +1,26 @@
+# Fly.io config for the Attendance backend.
+# Rename "app" to something globally unique before deploying (fly launch will prompt).
+app = "ece-attendance-backend"
+primary_region = "sin"  # change to your nearest region: iad, lhr, fra, sin, etc.
+
+[build]
+
+[env]
+  PORT = "8080"
+  DB_PATH = "/data/data.db"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+# Persistent volume so the SQLite file survives restarts/redeploys
+[mounts]
+  source = "attendance_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
