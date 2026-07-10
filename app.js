@@ -303,11 +303,16 @@ async function viewAttendance() {
       <button class="btn" id="saveAtt" style="margin-top:18px;width:100%">Save Attendance</button>
     </div>`;
 
+  // Guards against out-of-order responses when date/subject change quickly.
+  let attReq = 0;
   async function syncFromExisting() {
+    const my = ++attReq;
     const { exists, marks } = await api(`/attendance?date=${attState.date}&subject=${encodeURIComponent(attState.subject)}`);
+    if (my !== attReq) return false; // superseded by a newer request
     attState.marks = {};
     students.forEach(s => attState.marks[s.id] = exists ? (marks[s.id] || 'absent') : 'present');
     $('#existingTag').innerHTML = exists ? `<span class="badge info">Editing saved record</span>` : '';
+    return true;
   }
   function drawMarks() {
     $('#markList').innerHTML = students.map(s => `
@@ -325,8 +330,8 @@ async function viewAttendance() {
   }
   await syncFromExisting(); drawMarks();
 
-  $('#a_date').onchange = async e => { attState.date = e.target.value; await syncFromExisting(); drawMarks(); };
-  $('#a_subject').onchange = async e => { attState.subject = e.target.value; await syncFromExisting(); drawMarks(); };
+  $('#a_date').onchange = async e => { attState.date = e.target.value; if (await syncFromExisting()) drawMarks(); };
+  $('#a_subject').onchange = async e => { attState.subject = e.target.value; if (await syncFromExisting()) drawMarks(); };
   $('#allPresent').onclick = () => { students.forEach(s => attState.marks[s.id] = 'present'); drawMarks(); };
   $('#allAbsent').onclick = () => { students.forEach(s => attState.marks[s.id] = 'absent'); drawMarks(); };
   $('#saveAtt').onclick = async () => {
@@ -363,9 +368,16 @@ async function viewMarks() {
     $('#m_subdateWrap').style.display = marksType === 'Assignment' ? '' : 'none';
   }
 
+  // Guards against out-of-order responses when subject/type change quickly.
+  let marksReq = 0;
   async function drawMarks() {
     syncTypeUI();
-    const { marks: map, submissionDate } = await api(`/marks?subject=${encodeURIComponent(marksSubject)}&type=${encodeURIComponent(marksType)}`);
+    const my = ++marksReq;
+    const resp = await api(`/marks?subject=${encodeURIComponent(marksSubject)}&type=${encodeURIComponent(marksType)}`);
+    if (my !== marksReq) return; // a newer request superseded this one
+    // Tolerate both the new { marks, submissionDate } shape and a legacy bare map.
+    const map = resp && resp.marks ? resp.marks : (resp || {});
+    const submissionDate = resp ? resp.submissionDate : null;
     if ($('#m_subdate')) $('#m_subdate').value = submissionDate || '';
     const defMax = defaultMaxFor(marksType);
     const inputCss = 'padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)';
