@@ -17,6 +17,38 @@ function gradeFor(pct) {
   if (pct >= 60) return 'B+'; if (pct >= 50) return 'B'; if (pct >= 40) return 'C'; return 'F';
 }
 
+/* ---------- avatar / photo helpers ---------- */
+const initials = (name) => String(name || 'U').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'U';
+// Render a student avatar: photo if present, otherwise initials on a colored disc.
+function avatarHTML(photo, name, cls = '') {
+  return photo
+    ? `<span class="avatar ${cls}" style="background-image:url('${photo}')"></span>`
+    : `<span class="avatar ${cls} initials">${esc(initials(name))}</span>`;
+}
+// Read an image file and downscale it to a small square-ish JPEG data URL so it
+// stays a few KB in the database and API payloads.
+function readImageAsDataURL(file, maxDim = 256, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) return reject(new Error('Please choose an image file'));
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read file'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Invalid image'));
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 /* ---------- auth / API ---------- */
 let auth = { token: localStorage.getItem('token') || null, user: null };
 try { auth.user = JSON.parse(localStorage.getItem('user') || 'null'); } catch { auth.user = null; }
@@ -186,7 +218,7 @@ function drawStudents() {
   body.innerHTML = rows.map(s => {
     const col = s.stats.pct < 75 ? 'var(--red)' : 'var(--green)';
     return `<tr>
-      <td>${esc(s.name)}</td><td>${esc(s.reg)}</td><td>Sem ${esc(s.sem)}</td>
+      <td><span class="name-cell">${avatarHTML(s.photo, s.name)}${esc(s.name)}</span></td><td>${esc(s.reg)}</td><td>Sem ${esc(s.sem)}</td>
       <td>${progressBar(s.stats.pct, col)}</td>
       <td>${s.avgMark === null ? '—' : s.avgMark + '%'}</td>
       <td><div class="btn-row">
@@ -198,8 +230,17 @@ function drawStudents() {
   $$('[data-del]', body).forEach(b => b.onclick = () => delStudent(b.dataset.del));
 }
 function studentForm(id) {
-  const s = studentsCache.find(x => String(x.id) === String(id)) || { name: '', reg: '', sem: 5, email: '' };
+  const s = studentsCache.find(x => String(x.id) === String(id)) || { name: '', reg: '', sem: 5, email: '', photo: null };
+  // undefined = unchanged, null = removed, string = new data URL
+  let photoState;
   openModal(id ? 'Edit Student' : 'Add Student', `
+    <div class="photo-uploader">
+      <span id="f_photoPreview">${avatarHTML(s.photo, s.name, 'avatar-lg')}</span>
+      <div class="photo-actions">
+        <label class="btn sm outline">Upload Photo<input id="f_photo" type="file" accept="image/*" hidden /></label>
+        <button type="button" class="btn sm ghost-danger" id="f_photoRemove" ${s.photo ? '' : 'style="display:none"'}>Remove</button>
+      </div>
+    </div>
     <div class="field"><label>Full Name</label><input id="f_name" value="${esc(s.name)}" placeholder="e.g. Priya Kumar" /></div>
     <div class="field-row">
       <div class="field"><label>Register No</label><input id="f_reg" value="${esc(s.reg)}" placeholder="714024169001" /></div>
@@ -208,10 +249,20 @@ function studentForm(id) {
     <div class="field"><label>Email</label><input id="f_email" value="${esc(s.email||'')}" placeholder="student@ece.edu" /></div>
     <div class="field"><label>Password ${id ? '<span style="font-weight:400">(leave blank to keep current)</span>' : ''}</label><input id="f_pw" type="text" placeholder="${id ? 'unchanged' : 'Student@123'}" /></div>
     <button class="btn" id="f_save" style="width:100%">${id ? 'Save Changes' : 'Add Student'}</button>`);
+
+  const renderPreview = (photo, name) => { $('#f_photoPreview').innerHTML = avatarHTML(photo, name, 'avatar-lg'); };
+  $('#f_photo').onchange = async e => {
+    const file = e.target.files[0]; if (!file) return;
+    try { photoState = await readImageAsDataURL(file); renderPreview(photoState, $('#f_name').value); $('#f_photoRemove').style.display = ''; }
+    catch (err) { toast(err.message); }
+  };
+  $('#f_photoRemove').onclick = () => { photoState = null; renderPreview(null, $('#f_name').value); $('#f_photoRemove').style.display = 'none'; $('#f_photo').value = ''; };
+
   $('#f_save').onclick = async () => {
     const name = $('#f_name').value.trim(), reg = $('#f_reg').value.trim();
     if (!name || !reg) return toast('Name and Register No are required');
     const payload = { name, reg, sem: +$('#f_sem').value, email: $('#f_email').value.trim(), password: $('#f_pw').value };
+    if (photoState !== undefined) payload.photo = photoState; // only send when it changed
     try {
       if (id) await api('/students/' + id, { method: 'PUT', body: payload });
       else await api('/students', { method: 'POST', body: payload });
@@ -291,22 +342,36 @@ async function viewMarks() {
   if (!students.length) { content.innerHTML = `<div class="panel"><div class="empty">Add students first.</div></div>`; return; }
   marksSubject = marksSubject || META.subjects[0];
   marksType = marksType || META.markTypes[0];
+  // Default maximum score per assessment type: assignments are graded out of 10.
+  const defaultMaxFor = t => t === 'Assignment' ? 10 : 100;
   content.innerHTML = `
     <div class="controls">
       <select id="m_subject">${META.subjects.map(s => `<option ${s===marksSubject?'selected':''}>${esc(s)}</option>`).join('')}</select>
       <select id="m_type">${META.markTypes.map(t => `<option ${t===marksType?'selected':''}>${esc(t)}</option>`).join('')}</select>
+      <label id="m_subdateWrap" class="ctl-field" style="display:none">
+        <span>Submission date</span>
+        <input type="date" id="m_subdate" />
+      </label>
     </div>
     <div class="panel"><div class="table-wrap"><table>
       <thead><tr><th>Name</th><th>Reg No</th><th>Marks Obtained</th><th>Max</th><th>Grade</th></tr></thead>
       <tbody id="marksBody"></tbody></table></div>
       <button class="btn" id="saveMarks" style="margin-top:16px">Save Marks</button></div>`;
 
+  function syncTypeUI() {
+    // The submission date only applies to assignments.
+    $('#m_subdateWrap').style.display = marksType === 'Assignment' ? '' : 'none';
+  }
+
   async function drawMarks() {
-    const map = await api(`/marks?subject=${encodeURIComponent(marksSubject)}&type=${encodeURIComponent(marksType)}`);
+    syncTypeUI();
+    const { marks: map, submissionDate } = await api(`/marks?subject=${encodeURIComponent(marksSubject)}&type=${encodeURIComponent(marksType)}`);
+    if ($('#m_subdate')) $('#m_subdate').value = submissionDate || '';
+    const defMax = defaultMaxFor(marksType);
     const inputCss = 'padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)';
     $('#marksBody').innerHTML = students.map(s => {
       const m = map[s.id];
-      const obt = m ? m.obtained : '', max = m ? m.max : 100;
+      const obt = m ? m.obtained : '', max = m ? m.max : defMax;
       const g = m ? gradeFor((m.obtained / m.max) * 100) : '—';
       return `<tr data-stu="${s.id}">
         <td>${esc(s.name)}</td><td>${esc(s.reg)}</td>
@@ -318,12 +383,14 @@ async function viewMarks() {
   $('#m_subject').onchange = e => { marksSubject = e.target.value; drawMarks(); };
   $('#m_type').onchange = e => { marksType = e.target.value; drawMarks(); };
   $('#saveMarks').onclick = async () => {
+    const defMax = defaultMaxFor(marksType);
     const entries = $$('#marksBody tr').map(tr => ({
       studentId: Number(tr.dataset.stu),
       obtained: $('.mk-obt', tr).value,
-      max: $('.mk-max', tr).value || 100,
+      max: $('.mk-max', tr).value || defMax,
     }));
-    try { await api('/marks', { method: 'POST', body: { subject: marksSubject, type: marksType, entries } });
+    const submissionDate = marksType === 'Assignment' ? ($('#m_subdate')?.value || null) : null;
+    try { await api('/marks', { method: 'POST', body: { subject: marksSubject, type: marksType, entries, submissionDate } });
       toast('Marks saved'); drawMarks(); } catch (e) { toast(e.message); }
   };
   drawMarks();
@@ -361,7 +428,15 @@ async function downloadCsv() {
 function renderReportCard(area, r, canvasId) {
   const st = r.stats;
   const withMarks = r.subjMarks.filter(x => x.pct !== null);
+  const stu = r.student || {};
   area.innerHTML = `
+    <div class="panel student-header">
+      ${avatarHTML(stu.photo, stu.name, 'avatar-lg')}
+      <div class="student-header-meta">
+        <h3>${esc(stu.name || '')}</h3>
+        <span>${esc(stu.reg || '')}${stu.sem ? ` · Sem ${esc(stu.sem)}` : ''}</span>
+      </div>
+    </div>
     <div class="stat-grid">
       ${statCard('i-green', '✓', st.pct + '%', 'Attendance')}
       ${statCard('i-primary', '☰', st.present, 'Present Days')}
@@ -432,7 +507,7 @@ async function viewMyMarks() {
       <div class="table-wrap"><table>
         <thead><tr><th>Subject</th>${d.markTypes.map(t => `<th>${esc(t)}</th>`).join('')}<th>Overall</th><th>Grade</th></tr></thead>
         <tbody>${d.bySubject.map(s => `<tr><td>${esc(s.sub)}</td>
-          ${d.markTypes.map(t => { const m = s.byType[t]; return `<td>${m ? `${m.obtained}/${m.max}` : '—'}</td>`; }).join('')}
+          ${d.markTypes.map(t => { const m = s.byType[t]; return `<td>${m ? `${m.obtained}/${m.max}${m.submissionDate ? `<br><span class="muted" style="font-size:11px">${esc(m.submissionDate)}</span>` : ''}` : '—'}</td>`; }).join('')}
           <td>${s.pct === null ? '—' : s.pct + '%'}</td>
           <td>${s.grade ? `<span class="badge ${s.grade==='F'?'low':'good'}">${s.grade}</span>` : '—'}</td></tr>`).join('')}</tbody></table></div>
     </div>`;

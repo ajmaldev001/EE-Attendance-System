@@ -260,6 +260,26 @@ tbody tr:hover { background: var(--surface-2); }
 .btn.outline { background: var(--surface); border: 1px solid var(--border); color: var(--text); box-shadow: var(--shadow-xs); }
 .btn.outline:hover { background: var(--surface-2); border-color: var(--border-strong); }
 .btn-row { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.btn.ghost-danger { background: transparent; border: 1px solid var(--border); color: var(--red); }
+.btn.ghost-danger:hover { background: var(--surface-2); border-color: var(--red); }
+
+/* ---------- Avatars & photo upload ---------- */
+.avatar {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 32px; height: 32px; border-radius: 50%; overflow: hidden;
+  background-size: cover; background-position: center; background-repeat: no-repeat;
+  font-size: 12px; font-weight: 700; color: #fff; letter-spacing: .3px;
+  border: 1px solid var(--border);
+}
+.avatar.initials { background: var(--primary); border-color: transparent; }
+.avatar.avatar-lg { width: 72px; height: 72px; font-size: 24px; }
+.name-cell { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.photo-uploader { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.photo-actions { display: flex; flex-direction: column; gap: var(--sp-2); }
+.photo-actions .btn { text-align: center; cursor: pointer; }
+.student-header { display: flex; align-items: center; gap: var(--sp-4); }
+.student-header-meta h3 { font-size: 18px; margin: 0; }
+.student-header-meta span { color: var(--text-soft); font-size: 13px; }
 
 /* ---------- Forms ---------- */
 .field { margin-bottom: var(--sp-4); }
@@ -286,6 +306,9 @@ tbody tr:hover { background: var(--surface-2); }
   outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-ring);
 }
 .controls .search { flex: 1; min-width: 180px; }
+.controls .ctl-field { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: 13px; color: var(--text-soft); }
+.controls .ctl-field span { white-space: nowrap; }
+.muted { color: var(--text-soft); }
 
 /* ---------- Attendance marking ---------- */
 .mark-list { display: flex; flex-direction: column; gap: var(--sp-2); }

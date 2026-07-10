@@ -118,7 +118,8 @@ async function createSchema() {
       reg_no TEXT UNIQUE NOT NULL,
       semester INTEGER NOT NULL DEFAULT 5,
       email TEXT,
-      password_hash TEXT NOT NULL
+      password_hash TEXT NOT NULL,
+      photo TEXT
     );
     CREATE TABLE IF NOT EXISTS attendance_sessions (
       id SERIAL PRIMARY KEY,
@@ -139,9 +140,13 @@ async function createSchema() {
       type TEXT NOT NULL,
       obtained REAL NOT NULL,
       max REAL NOT NULL DEFAULT 100,
+      submission_date TEXT,
       UNIQUE (student_id, subject, type)
     );
   `);
+  // Idempotent migrations for databases created before these columns existed.
+  await pool.query('ALTER TABLE marks ADD COLUMN IF NOT EXISTS submission_date TEXT');
+  await pool.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS photo TEXT');
 }
 
 /* ---------- seed ---------- */

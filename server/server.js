@@ -9,7 +9,8 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
-app.use(express.json());
+// Raise the limit so student photos (small base64 data URLs) fit comfortably.
+app.use(express.json({ limit: '5mb' }));
 
 /* small async wrapper so thrown errors return JSON 500 instead of crashing */
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch(err => {
@@ -40,7 +41,7 @@ function gradeFor(pct) {
 }
 
 function publicStudent(s) {
-  return { id: s.id, name: s.name, reg: s.reg_no, sem: s.semester, email: s.email };
+  return { id: s.id, name: s.name, reg: s.reg_no, sem: s.semester, email: s.email, photo: s.photo || null };
 }
 
 /* ================= AUTH ================= */
@@ -92,18 +93,18 @@ app.get('/api/students', staff, wrap(async (req, res) => {
 }));
 
 app.post('/api/students', staff, wrap(async (req, res) => {
-  const { name, reg, sem, email, password } = req.body || {};
+  const { name, reg, sem, email, password, photo } = req.body || {};
   if (!name || !reg) return res.status(400).json({ error: 'Name and Register No are required' });
   const exists = await one('SELECT id FROM students WHERE reg_no = $1', [reg.trim()]);
   if (exists) return res.status(409).json({ error: 'Register No already exists' });
   const pw = bcrypt.hashSync(password && password.length ? password : 'Student@123', 10);
-  const row = await one('INSERT INTO students (name, reg_no, semester, email, password_hash) VALUES ($1,$2,$3,$4,$5) RETURNING id',
-    [name.trim(), reg.trim(), Number(sem) || 5, (email || '').trim(), pw]);
+  const row = await one('INSERT INTO students (name, reg_no, semester, email, password_hash, photo) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+    [name.trim(), reg.trim(), Number(sem) || 5, (email || '').trim(), pw, photo || null]);
   res.status(201).json({ id: row.id });
 }));
 
 app.put('/api/students/:id', staff, wrap(async (req, res) => {
-  const { name, reg, sem, email, password } = req.body || {};
+  const { name, reg, sem, email, password, photo } = req.body || {};
   const s = await one('SELECT * FROM students WHERE id = $1', [req.params.id]);
   if (!s) return res.status(404).json({ error: 'Student not found' });
   if (reg) {
@@ -111,8 +112,10 @@ app.put('/api/students/:id', staff, wrap(async (req, res) => {
     if (dup) return res.status(409).json({ error: 'Register No already exists' });
   }
   const pw = password && password.length ? bcrypt.hashSync(password, 10) : s.password_hash;
-  await pool.query('UPDATE students SET name=$1, reg_no=$2, semester=$3, email=$4, password_hash=$5 WHERE id=$6',
-    [name ?? s.name, (reg ?? s.reg_no).trim(), Number(sem) || s.semester, email ?? s.email, pw, s.id]);
+  // photo omitted → keep current; null → clear; string → replace.
+  const newPhoto = photo === undefined ? s.photo : photo;
+  await pool.query('UPDATE students SET name=$1, reg_no=$2, semester=$3, email=$4, password_hash=$5, photo=$6 WHERE id=$7',
+    [name ?? s.name, (reg ?? s.reg_no).trim(), Number(sem) || s.semester, email ?? s.email, pw, newPhoto, s.id]);
   res.json({ ok: true });
 }));
 
@@ -158,21 +161,26 @@ app.post('/api/attendance', staff, wrap(async (req, res) => {
 app.get('/api/marks', staff, wrap(async (req, res) => {
   const { subject, type } = req.query;
   if (!subject || !type) return res.status(400).json({ error: 'subject and type required' });
-  const rows = await q('SELECT student_id, obtained, max FROM marks WHERE subject = $1 AND type = $2', [subject, type]);
+  const rows = await q('SELECT student_id, obtained, max, submission_date FROM marks WHERE subject = $1 AND type = $2', [subject, type]);
   const map = {};
-  rows.forEach(r => { map[r.student_id] = { obtained: r.obtained, max: r.max }; });
-  res.json(map);
+  let submissionDate = null;
+  rows.forEach(r => {
+    map[r.student_id] = { obtained: r.obtained, max: r.max };
+    if (r.submission_date) submissionDate = r.submission_date;
+  });
+  res.json({ marks: map, submissionDate });
 }));
 
 app.post('/api/marks', staff, wrap(async (req, res) => {
-  const { subject, type, entries } = req.body || {};
+  const { subject, type, entries, submissionDate } = req.body || {};
   if (!subject || !type || !Array.isArray(entries)) return res.status(400).json({ error: 'subject, type, entries required' });
+  const subDate = submissionDate || null;
   await tx(async (client) => {
     for (const e of entries) {
       await client.query('DELETE FROM marks WHERE student_id = $1 AND subject = $2 AND type = $3', [e.studentId, subject, type]);
       if (e.obtained !== null && e.obtained !== '' && !isNaN(e.obtained)) {
-        await client.query('INSERT INTO marks (student_id, subject, type, obtained, max) VALUES ($1,$2,$3,$4,$5)',
-          [e.studentId, subject, type, Number(e.obtained), Number(e.max) || 100]);
+        await client.query('INSERT INTO marks (student_id, subject, type, obtained, max, submission_date) VALUES ($1,$2,$3,$4,$5,$6)',
+          [e.studentId, subject, type, Number(e.obtained), Number(e.max) || 100, subDate]);
       }
     }
   });
@@ -242,11 +250,11 @@ app.get('/api/me/attendance', studentOnly, wrap(async (req, res) => {
 }));
 
 app.get('/api/me/marks', studentOnly, wrap(async (req, res) => {
-  const rows = await q('SELECT subject, type, obtained, max FROM marks WHERE student_id = $1', [req.user.id]);
+  const rows = await q('SELECT subject, type, obtained, max, submission_date FROM marks WHERE student_id = $1', [req.user.id]);
   const bySubject = SUBJECTS.map(sub => {
     const ms = rows.filter(r => r.subject === sub);
     const byType = {};
-    ms.forEach(m => { byType[m.type] = { obtained: m.obtained, max: m.max }; });
+    ms.forEach(m => { byType[m.type] = { obtained: m.obtained, max: m.max, submissionDate: m.submission_date }; });
     const pct = ms.length ? Math.round(ms.reduce((a, m) => a + (m.obtained / m.max) * 100, 0) / ms.length) : null;
     return { sub, byType, pct, grade: pct === null ? null : gradeFor(pct) };
   });
