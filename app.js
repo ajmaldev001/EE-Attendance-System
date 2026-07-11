@@ -269,7 +269,7 @@ function drawStudents() {
   body.innerHTML = rows.map(s => {
     return `<tr>
       <td>${esc(s.roll || '—')}</td>
-      <td><span class="name-cell">${avatarHTML(s.photo, s.name)}${esc(s.name)}</span></td><td>${esc(s.reg)}</td><td>Sem ${esc(s.sem)}</td>
+      <td><span class="name-cell">${avatarHTML(s.photo, s.name)}${esc(s.name)}${s.lateral ? ' <span class="badge info">Lateral Entry</span>' : ''}</span></td><td>${esc(s.reg)}</td><td>Sem ${esc(s.sem)}</td>
       <td>${progressBar(s.stats.pct, attColor(s.stats.pct))}</td>
       <td>${s.avgMark === null ? '—' : s.avgMark + '%'}</td>
       ${isAdmin() ? `<td><div class="btn-row">
@@ -640,7 +640,7 @@ function renderReportCard(area, r, canvasId) {
       ${avatarHTML(stu.photo, stu.name, 'avatar-lg')}
       <div class="student-header-meta">
         <h3>${esc(stu.name || '')}</h3>
-        <span>${stu.roll ? `Roll ${esc(stu.roll)} · ` : ''}${esc(stu.reg || '')}${stu.sem ? ` · Sem ${esc(stu.sem)}` : ''}</span>
+        <span>${stu.roll ? `Roll ${esc(stu.roll)} · ` : ''}${esc(stu.reg || '')}${stu.sem ? ` · Sem ${esc(stu.sem)}` : ''}${stu.lateral ? ' · Lateral Entry' : ''}</span>
       </div>
     </div>
     <div class="stat-grid">

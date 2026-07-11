@@ -47,7 +47,7 @@ function gradeFor(pct) {
 }
 
 function publicStudent(s) {
-  return { id: s.id, name: s.name, roll: s.roll_no || null, reg: s.reg_no, sem: s.semester, email: s.email, photo: s.photo || null };
+  return { id: s.id, name: s.name, roll: s.roll_no || null, reg: s.reg_no, sem: s.semester, email: s.email, photo: s.photo || null, lateral: !!s.lateral_entry };
 }
 
 function publicFaculty(u) {

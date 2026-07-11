@@ -188,7 +188,8 @@ async function createSchema() {
       semester INTEGER NOT NULL DEFAULT 5,
       email TEXT,
       password_hash TEXT NOT NULL,
-      photo TEXT
+      photo TEXT,
+      lateral_entry BOOLEAN NOT NULL DEFAULT FALSE
     );
     CREATE TABLE IF NOT EXISTS attendance_sessions (
       id SERIAL PRIMARY KEY,
@@ -221,6 +222,7 @@ async function createSchema() {
   await pool.query('ALTER TABLE marks ADD COLUMN IF NOT EXISTS submission_date TEXT');
   await pool.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS photo TEXT');
   await pool.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS roll_no TEXT');
+  await pool.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS lateral_entry BOOLEAN NOT NULL DEFAULT FALSE');
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS department TEXT');
   // Widen the role constraint so hod/faculty are allowed on pre-existing databases.
   await pool.query('ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check');
@@ -231,6 +233,9 @@ async function createSchema() {
 }
 
 /* ---------- seed ---------- */
+// 300-series register numbers (714024169301, 714024169302, …) are lateral-entry students.
+const isLateralReg = (reg) => /^7140241693\d\d$/.test(String(reg || ''));
+
 // Insert a user only if the email is not already present (idempotent).
 async function ensureUser(name, email, password, role, department) {
   const exists = await one('SELECT id FROM users WHERE email = $1', [email]);
@@ -259,8 +264,8 @@ async function seedIfEmpty() {
       const rollNo = String(i).padStart(2, '0');
       const email = name.split(' ')[0].toLowerCase() + '@eevlsi.edu';
       await pool.query(
-        'INSERT INTO students (name, roll_no, reg_no, semester, email, password_hash) VALUES ($1,$2,$3,$4,$5,$6)',
-        [name, rollNo, reg, 5, email, studentPw]);
+        'INSERT INTO students (name, roll_no, reg_no, semester, email, password_hash, lateral_entry) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [name, rollNo, reg, 5, email, studentPw, isLateralReg(reg)]);
     }
     console.log(`🌱 Seeded ${STUDENTS.length} students.`);
   }
@@ -270,6 +275,9 @@ async function seedIfEmpty() {
   for (let j = 0; j < missingRoll.length; j++) {
     await pool.query('UPDATE students SET roll_no = $1 WHERE id = $2', [String(j + 1).padStart(2, '0'), missingRoll[j].id]);
   }
+
+  // Keep the lateral-entry flag in sync with the 300-series register numbers.
+  await pool.query("UPDATE students SET lateral_entry = (reg_no ~ '^7140241693[0-9][0-9]$') WHERE lateral_entry <> (reg_no ~ '^7140241693[0-9][0-9]$')");
 
   console.log(`🌱 Ensured admin + ${FACULTY.length} teaching staff (HOD: ${COLLEGE.hod}).`);
 }
