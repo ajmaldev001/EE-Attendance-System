@@ -10,6 +10,7 @@ const COLLEGE = {
   academicYear: '2026–2027',
   semester: 'V',
   hod: 'Dr. P. Dhilip Kumar',
+  classAdvisor: 'Mr. S. Boopathy', // update here if the class advisor is someone else
 };
 
 // Subject allocation: { code, name, faculty (display string) }.

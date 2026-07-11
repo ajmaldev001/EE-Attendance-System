@@ -182,17 +182,24 @@ async function viewDashboard() {
   const todayPct = d.today && d.today.pct !== null && d.today.pct !== undefined ? d.today.pct + '%' : '—';
   content.innerHTML = `
     <div class="college-banner">
-      <div class="cb-main">
-        <h2>${esc(c.name || '')}</h2>
-        <p>${esc(c.department || '')}</p>
-        <div class="cb-tags">
-          <span>${esc(c.className || '')}</span>
-          <span>Semester ${esc(c.semester || '')}</span>
-          <span>${esc(c.academicYear || '')}</span>
-          <span>HOD: ${esc(c.hod || '')}</span>
-        </div>
+      <div class="cb-img" id="cbImgWrap">
+        <img src="assets/college-banner.png" alt="${esc(c.name || 'College banner')}"
+             onerror="document.getElementById('cbImgWrap').style.display='none';document.getElementById('cbTextHead').style.display=''" />
       </div>
-      <div class="cb-date"><span>${esc(dateStr)}</span><b id="cbClock">${esc(now.toLocaleTimeString())}</b></div>
+      <div class="cb-body">
+        <div class="cb-main">
+          <h2 id="cbTextHead" style="display:none">${esc(c.name || '')}</h2>
+          <p>${esc(c.department || '')}</p>
+          <div class="cb-tags">
+            <span>${esc(c.className || '')}</span>
+            <span>Semester ${esc(c.semester || '')}</span>
+            <span>${esc(c.academicYear || '')}</span>
+            <span>HOD: ${esc(c.hod || '')}</span>
+            ${c.classAdvisor ? `<span>Class Advisor: ${esc(c.classAdvisor)}</span>` : ''}
+          </div>
+        </div>
+        <div class="cb-date"><span>${esc(dateStr)}</span><b id="cbClock">${esc(now.toLocaleTimeString())}</b></div>
+      </div>
     </div>
     <div class="stat-grid">
       ${statCard('i-primary', '☰', d.totalStudents, 'Total Students')}
