@@ -380,6 +380,11 @@ tbody tr:hover { background: var(--surface-2); }
 .faculty-card .fc-meta > div { display: flex; justify-content: space-between; gap: var(--sp-3); font-size: 13px; }
 .faculty-card .fc-meta span { color: var(--text-soft); }
 .faculty-card .fc-meta b { text-align: right; word-break: break-word; }
+.faculty-card .fc-sub { flex-direction: column; align-items: flex-start; }
+.faculty-card .fc-sublist { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.faculty-card .fc-sublist > div { display: flex; gap: var(--sp-2); align-items: baseline; }
+.faculty-card .fc-sublist b { text-align: left; white-space: nowrap; }
+.faculty-card .fc-sublist em { font-style: normal; color: var(--text-soft); font-size: 12px; }
 
 /* ---------- Progress ---------- */
 .progress { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; width: 100%; min-width: 90px; }

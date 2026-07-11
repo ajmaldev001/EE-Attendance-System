@@ -366,7 +366,10 @@ function drawFaculty() {
       <div class="fc-meta">
         <div><span>Department</span><b>${esc(f.department || '—')}</b></div>
         <div><span>Email</span><b>${esc(f.email)}</b></div>
-        <div><span>Subjects</span><b>${f.subjects.length ? f.subjects.map(s => esc(s.code)).join(', ') : '—'}</b></div>
+        <div class="fc-sub"><span>Subjects</span>
+          ${f.subjects.length ? `<div class="fc-sublist">${f.subjects.map(s =>
+            `<div><b>${esc(s.code)}</b><em>${esc(s.name)}</em></div>`).join('')}</div>` : '<b>—</b>'}
+        </div>
       </div>
       ${isAdmin() ? `<div class="btn-row" style="margin-top:14px">
         <button class="btn sm outline" data-edit="${f.id}">Edit</button>
