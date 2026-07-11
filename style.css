@@ -338,9 +338,14 @@ tbody tr:hover { background: var(--surface-2); }
 
 /* ---------- College banner ---------- */
 .college-banner {
-  display: flex; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap;
   background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 62%, #000));
-  color: #fff; border-radius: var(--r-xl); padding: var(--sp-5); margin-bottom: var(--sp-4); box-shadow: var(--shadow-md);
+  color: #fff; border-radius: var(--r-xl); margin-bottom: var(--sp-4); box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+.college-banner .cb-img { background: #fff; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.college-banner .cb-img img { display: block; width: 100%; max-height: 96px; object-fit: contain; }
+.college-banner .cb-body {
+  display: flex; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; padding: var(--sp-5);
 }
 .college-banner .cb-main h2 { font-size: 20px; line-height: 1.25; margin: 0 0 4px; }
 .college-banner .cb-main p { opacity: .92; margin: 0 0 var(--sp-3); font-size: 14px; }
