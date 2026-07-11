@@ -113,6 +113,7 @@ const NAVS = {
   admin:   [N_DASH, N_STU, N_FAC, N_ATT, N_MARKS, N_REP],
   staff:   [N_DASH, N_STU, N_FAC, N_ATT, N_MARKS, N_REP],
   hod:     [N_DASH, N_STU, N_FAC, N_ATT, N_REP],
+  advisor: [N_DASH, N_STU, N_ATT, N_MARKS, N_REP],
   faculty: [N_DASH, N_ATT, N_MARKS, N_REP],
   student: [
     { view: 'mydash', glyph: '▚', label: 'Dashboard' },
@@ -359,7 +360,7 @@ function drawFaculty() {
         <span class="avatar initials">${esc(initials(f.name))}</span>
         <div class="fc-id">
           <h4>${esc(f.name)}</h4>
-          <span class="badge ${f.role === 'hod' ? 'good' : 'info'}">${f.role === 'hod' ? 'HOD' : 'Faculty'}</span>
+          <span class="badge ${f.role === 'hod' ? 'good' : f.role === 'advisor' ? 'warn' : 'info'}">${f.role === 'hod' ? 'HOD' : f.role === 'advisor' ? 'Class Advisor' : 'Faculty'}</span>
         </div>
       </div>
       <div class="fc-meta">
@@ -383,8 +384,9 @@ function facultyForm(id) {
     <div class="field"><label>Full Name</label><input id="ff_name" value="${esc(f.name)}" placeholder="e.g. Dr. A. Kumar" /></div>
     <div class="field-row">
       <div class="field"><label>Role</label><select id="ff_role">
-        <option value="faculty" ${f.role!=='hod'?'selected':''}>Faculty</option>
-        <option value="hod" ${f.role==='hod'?'selected':''}>HOD</option></select></div>
+        <option value="faculty" ${f.role!=='hod'&&f.role!=='advisor'?'selected':''}>Faculty</option>
+        <option value="hod" ${f.role==='hod'?'selected':''}>HOD</option>
+        <option value="advisor" ${f.role==='advisor'?'selected':''}>Class Advisor</option></select></div>
       <div class="field"><label>Department</label><input id="ff_dept" value="${esc(f.department||'')}" placeholder="EE-VDT" /></div>
     </div>
     <div class="field"><label>Email ${id ? '' : '<span style="font-weight:400">(auto-generated if blank)</span>'}</label><input id="ff_email" value="${esc(f.email||'')}" placeholder="name@siet.edu" /></div>

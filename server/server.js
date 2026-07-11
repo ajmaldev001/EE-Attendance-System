@@ -54,16 +54,22 @@ function publicFaculty(u) {
   return { id: u.id, name: u.name, email: u.email, role: u.role, department: u.department || null };
 }
 
-// Subjects a given user may take attendance for. Admin/HOD see all; faculty see
-// the subjects whose allocation names them.
+// Subjects a given user may take attendance for. Admin/HOD/class advisor see
+// all; faculty see the subjects whose allocation names them.
 function subjectsForUser(user) {
-  if (!user || user.role === 'admin' || user.role === 'hod') return SUBJECTS;
+  if (!user || user.role === 'admin' || user.role === 'hod' || user.role === 'advisor') return SUBJECTS;
   const needle = (user.name || '').toLowerCase();
   return SUBJECTS.filter(s => s.faculty.toLowerCase().includes(needle));
 }
 
+// College identity with the class advisor resolved from whoever holds the role.
+async function collegeInfo() {
+  const adv = await one("SELECT name FROM users WHERE role = 'advisor' ORDER BY id LIMIT 1");
+  return { ...COLLEGE, classAdvisor: adv ? adv.name : COLLEGE.classAdvisor };
+}
+
 /* ================= AUTH ================= */
-app.get('/api/meta', (req, res) => res.json({ college: COLLEGE, subjects: SUBJECTS, periods: PERIODS, markTypes: MARK_TYPES }));
+app.get('/api/meta', wrap(async (req, res) => res.json({ college: await collegeInfo(), subjects: SUBJECTS, periods: PERIODS, markTypes: MARK_TYPES })));
 
 app.post('/api/login', wrap(async (req, res) => {
   const { role, identifier, password } = req.body || {};
@@ -89,7 +95,7 @@ app.get('/api/me', authenticate, (req, res) => res.json({ user: req.user }));
 // staff      → anyone who works with class data: admin, HOD, faculty
 const admin = [authenticate, requireRole('admin')];
 const adminHod = [authenticate, requireRole('admin', 'hod')];
-const staff = [authenticate, requireRole('admin', 'staff', 'hod', 'faculty')];
+const staff = [authenticate, requireRole('admin', 'staff', 'hod', 'faculty', 'advisor')];
 
 async function studentWithStats(s) {
   return { ...publicStudent(s), stats: await attendanceStats(s.id), avgMark: await studentAvgMark(s.id) };
@@ -100,7 +106,7 @@ app.get('/api/dashboard', staff, wrap(async (req, res) => {
   const { date } = req.query;
   const students = await q('SELECT * FROM students ORDER BY reg_no');
   const sessions = Number((await one('SELECT COUNT(*)::int AS c FROM attendance_sessions')).c);
-  const totalFaculty = Number((await one("SELECT COUNT(*)::int AS c FROM users WHERE role IN ('hod','faculty')")).c);
+  const totalFaculty = Number((await one("SELECT COUNT(*)::int AS c FROM users WHERE role IN ('hod','faculty','advisor')")).c);
   const withStats = await Promise.all(students.map(async s => ({ ...publicStudent(s), stats: await attendanceStats(s.id) })));
   const pcts = withStats.map(s => s.stats.pct);
   const avgAtt = withStats.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / withStats.length) : 0;
@@ -121,7 +127,7 @@ app.get('/api/dashboard', staff, wrap(async (req, res) => {
   }
 
   res.json({
-    college: COLLEGE,
+    college: await collegeInfo(),
     totalStudents: students.length, totalFaculty, sessions, avgAtt, low, students: withStats,
     statusTotals: { present, absent, late, od },
     today: { periods: periodsToday, totalPeriods: PERIODS.length, pct: todayPct },
@@ -169,7 +175,7 @@ app.delete('/api/students/:id', admin, wrap(async (req, res) => {
 
 /* ================= FACULTY ================= */
 app.get('/api/faculty', staff, wrap(async (req, res) => {
-  const rows = await q("SELECT * FROM users WHERE role IN ('hod','faculty') ORDER BY role DESC, name");
+  const rows = await q("SELECT * FROM users WHERE role IN ('hod','faculty','advisor') ORDER BY role DESC, name");
   // Attach the subjects each faculty is allocated.
   const list = rows.map(u => ({
     ...publicFaculty(u),
@@ -184,7 +190,7 @@ app.post('/api/faculty', admin, wrap(async (req, res) => {
   const mail = (email && email.trim()) ? email.trim().toLowerCase() : facultyEmail(name);
   const dup = await one('SELECT id FROM users WHERE email = $1', [mail]);
   if (dup) return res.status(409).json({ error: 'Email already exists' });
-  const r = role === 'hod' ? 'hod' : 'faculty';
+  const r = ['hod', 'advisor'].includes(role) ? role : 'faculty';
   const pw = bcrypt.hashSync(password && password.length ? password : (r === 'hod' ? 'Hod@123' : 'Faculty@123'), 10);
   const row = await one('INSERT INTO users (name, email, password_hash, role, department) VALUES ($1,$2,$3,$4,$5) RETURNING id',
     [name.trim(), mail, pw, r, (department || '').trim() || null]);
@@ -193,21 +199,21 @@ app.post('/api/faculty', admin, wrap(async (req, res) => {
 
 app.put('/api/faculty/:id', admin, wrap(async (req, res) => {
   const { name, email, department, role, password } = req.body || {};
-  const u = await one("SELECT * FROM users WHERE id = $1 AND role IN ('hod','faculty')", [req.params.id]);
+  const u = await one("SELECT * FROM users WHERE id = $1 AND role IN ('hod','faculty','advisor')", [req.params.id]);
   if (!u) return res.status(404).json({ error: 'Faculty not found' });
   if (email) {
     const dup = await one('SELECT id FROM users WHERE email = $1 AND id != $2', [email.trim().toLowerCase(), u.id]);
     if (dup) return res.status(409).json({ error: 'Email already exists' });
   }
   const pw = password && password.length ? bcrypt.hashSync(password, 10) : u.password_hash;
-  const r = role ? (role === 'hod' ? 'hod' : 'faculty') : u.role;
+  const r = role ? (['hod', 'advisor'].includes(role) ? role : 'faculty') : u.role;
   await pool.query('UPDATE users SET name=$1, email=$2, department=$3, role=$4, password_hash=$5 WHERE id=$6',
     [name ?? u.name, (email ?? u.email).trim().toLowerCase(), department ?? u.department, r, pw, u.id]);
   res.json({ ok: true });
 }));
 
 app.delete('/api/faculty/:id', admin, wrap(async (req, res) => {
-  await pool.query("DELETE FROM users WHERE id = $1 AND role IN ('hod','faculty')", [req.params.id]);
+  await pool.query("DELETE FROM users WHERE id = $1 AND role IN ('hod','faculty','advisor')", [req.params.id]);
   res.json({ ok: true });
 }));
 

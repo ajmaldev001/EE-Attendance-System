@@ -178,7 +178,7 @@ async function createSchema() {
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       department TEXT,
-      role TEXT NOT NULL CHECK (role IN ('admin','staff','hod','faculty'))
+      role TEXT NOT NULL CHECK (role IN ('admin','staff','hod','faculty','advisor'))
     );
     CREATE TABLE IF NOT EXISTS students (
       id SERIAL PRIMARY KEY,
@@ -224,9 +224,9 @@ async function createSchema() {
   await pool.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS roll_no TEXT');
   await pool.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS lateral_entry BOOLEAN NOT NULL DEFAULT FALSE');
   await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS department TEXT');
-  // Widen the role constraint so hod/faculty are allowed on pre-existing databases.
+  // Widen the role constraint so hod/faculty/advisor are allowed on pre-existing databases.
   await pool.query('ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check');
-  await pool.query("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin','staff','hod','faculty'))");
+  await pool.query("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin','staff','hod','faculty','advisor'))");
   // Allow the OD status on databases whose attendance_records predate it.
   await pool.query('ALTER TABLE attendance_records DROP CONSTRAINT IF EXISTS attendance_records_status_check');
   await pool.query("ALTER TABLE attendance_records ADD CONSTRAINT attendance_records_status_check CHECK (status IN ('present','absent','late','od'))");
@@ -278,6 +278,12 @@ async function seedIfEmpty() {
 
   // Keep the lateral-entry flag in sync with the 300-series register numbers.
   await pool.query("UPDATE students SET lateral_entry = (reg_no ~ '^7140241693[0-9][0-9]$') WHERE lateral_entry <> (reg_no ~ '^7140241693[0-9][0-9]$')");
+
+  // Promote the configured class advisor once (admin can reassign the role from the Faculty view later).
+  const hasAdvisor = await one("SELECT id FROM users WHERE role = 'advisor' LIMIT 1");
+  if (!hasAdvisor && COLLEGE.classAdvisor) {
+    await pool.query("UPDATE users SET role = 'advisor' WHERE name = $1 AND role = 'faculty'", [COLLEGE.classAdvisor]);
+  }
 
   console.log(`🌱 Ensured admin + ${FACULTY.length} teaching staff (HOD: ${COLLEGE.hod}).`);
 }
