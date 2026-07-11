@@ -745,16 +745,11 @@ const loginScreen = $('#loginScreen');
 const appEl = $('#app');
 let loginRole = 'staff';
 
-const HINTS = {
-  staff: 'Admin: <b>admin@ece.edu / Admin@123</b><br>HOD: <b>dhilip.kumar@siet.edu / Hod@123</b><br>Faculty: <b>boopathy@siet.edu / Faculty@123</b>',
-  student: 'Register No: <b>714024169001</b> … <b>714024169054</b><br>Password: <b>Student@123</b>',
-};
 function setLoginRole(role) {
   loginRole = role;
   $$('.role-btn').forEach(b => b.classList.toggle('active', b.dataset.role === role));
   $('#idLabel').textContent = role === 'student' ? 'Register Number' : 'Email';
   $('#loginId').placeholder = role === 'student' ? '714024169001' : 'name@siet.edu';
-  $('#loginHint').innerHTML = HINTS[role];
 }
 $$('.role-btn').forEach(b => b.onclick = () => setLoginRole(b.dataset.role));
 
