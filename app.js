@@ -103,21 +103,40 @@ function progressBar(pct, color) {
 function loadingHTML() { return `<div class="panel"><div class="empty">Loading…</div></div>`; }
 
 /* ================= NAV / ROLE ================= */
+const N_DASH = { view: 'dashboard', glyph: '▚', label: 'Dashboard' };
+const N_STU = { view: 'students', glyph: '☰', label: 'Students' };
+const N_FAC = { view: 'faculty', glyph: '♟', label: 'Faculty' };
+const N_ATT = { view: 'attendance', glyph: '✓', label: 'Attendance' };
+const N_MARKS = { view: 'marks', glyph: '✎', label: 'Marks' };
+const N_REP = { view: 'reports', glyph: '▤', label: 'Reports' };
 const NAVS = {
-  staff: [
-    { view: 'dashboard', glyph: '▚', label: 'Dashboard' },
-    { view: 'students', glyph: '☰', label: 'Students' },
-    { view: 'attendance', glyph: '✓', label: 'Attendance' },
-    { view: 'marks', glyph: '✎', label: 'Marks' },
-    { view: 'reports', glyph: '▤', label: 'Reports' },
-  ],
+  admin:   [N_DASH, N_STU, N_FAC, N_ATT, N_MARKS, N_REP],
+  staff:   [N_DASH, N_STU, N_FAC, N_ATT, N_MARKS, N_REP],
+  hod:     [N_DASH, N_STU, N_FAC, N_ATT, N_REP],
+  faculty: [N_DASH, N_ATT, N_MARKS, N_REP],
   student: [
     { view: 'mydash', glyph: '▚', label: 'Dashboard' },
     { view: 'myattendance', glyph: '✓', label: 'My Attendance' },
     { view: 'mymarks', glyph: '✎', label: 'My Marks' },
   ],
 };
-function navKey() { return auth.user.role === 'student' ? 'student' : 'staff'; }
+function navKey() {
+  const r = auth.user.role;
+  if (r === 'student') return 'student';
+  return NAVS[r] ? r : 'admin';
+}
+
+/* role capability helpers */
+const roleIs = (...rs) => rs.includes(auth.user.role);
+const isAdmin = () => roleIs('admin', 'staff');
+const isOverseer = () => roleIs('admin', 'staff', 'hod'); // can view everything / unlock
+
+/* subject helpers (META.subjects are { code, name, faculty } objects) */
+const subjectNames = () => META.subjects.map(s => s.name);
+const subjectByName = (name) => META.subjects.find(s => s.name === name) || null;
+
+/* traffic-light colour for an attendance %: 🟢 ≥75, 🟡 60–74, 🔴 <60 */
+function attColor(pct) { return pct >= 75 ? 'var(--green)' : pct >= 60 ? 'var(--amber)' : 'var(--red)'; }
 
 let currentView = null;
 function buildSidebar() {
@@ -128,17 +147,18 @@ function buildSidebar() {
   $$('.nav-item').forEach(b => b.onclick = () => { render(b.dataset.view); $('#sidebar').classList.remove('open'); });
 
   const u = auth.user;
+  const ROLE_LABEL = { admin: 'Administrator', staff: 'Administrator', hod: 'Head of Department', faculty: 'Faculty', student: 'Student' };
   $('#userName').textContent = u.name;
-  $('#userRole').textContent = u.role;
+  $('#userRole').textContent = ROLE_LABEL[u.role] || u.role;
   $('#userAvatar').textContent = (u.name || 'U').trim().charAt(0).toUpperCase();
 }
 
 const VIEW_FN = {
-  dashboard: viewDashboard, students: viewStudents, attendance: viewAttendance, marks: viewMarks, reports: viewReports,
+  dashboard: viewDashboard, students: viewStudents, faculty: viewFaculty, attendance: viewAttendance, marks: viewMarks, reports: viewReports,
   mydash: viewMyDashboard, myattendance: viewMyAttendance, mymarks: viewMyMarks,
 };
 const VIEW_TITLE = {
-  dashboard: 'Dashboard', students: 'Students', attendance: 'Attendance', marks: 'Marks', reports: 'Reports',
+  dashboard: 'Dashboard', students: 'Students', faculty: 'Faculty', attendance: 'Attendance', marks: 'Marks', reports: 'Reports',
   mydash: 'My Dashboard', myattendance: 'My Attendance', mymarks: 'My Marks',
 };
 
@@ -154,13 +174,31 @@ async function render(view) {
 
 /* ================= STAFF: DASHBOARD ================= */
 async function viewDashboard() {
-  const d = await api('/dashboard');
+  const today = new Date().toISOString().slice(0, 10);
+  const d = await api('/dashboard?date=' + today);
+  const c = d.college || META.college || {};
+  const now = new Date();
+  const dateStr = now.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const todayPct = d.today && d.today.pct !== null && d.today.pct !== undefined ? d.today.pct + '%' : '—';
   content.innerHTML = `
+    <div class="college-banner">
+      <div class="cb-main">
+        <h2>${esc(c.name || '')}</h2>
+        <p>${esc(c.department || '')}</p>
+        <div class="cb-tags">
+          <span>${esc(c.className || '')}</span>
+          <span>Semester ${esc(c.semester || '')}</span>
+          <span>${esc(c.academicYear || '')}</span>
+          <span>HOD: ${esc(c.hod || '')}</span>
+        </div>
+      </div>
+      <div class="cb-date"><span>${esc(dateStr)}</span><b id="cbClock">${esc(now.toLocaleTimeString())}</b></div>
+    </div>
     <div class="stat-grid">
       ${statCard('i-primary', '☰', d.totalStudents, 'Total Students')}
-      ${statCard('i-green', '✓', d.avgAtt + '%', 'Avg Attendance')}
-      ${statCard('i-blue', '▤', d.sessions, 'Sessions Logged')}
-      ${statCard('i-red', '!', d.low.length, 'Below 75%')}
+      ${statCard('i-blue', '♟', d.totalFaculty, 'Total Faculty')}
+      ${statCard('i-green', '✓', todayPct, `Attendance Today (${d.today ? d.today.periods : 0}/${d.today ? d.today.totalPeriods : 9} periods)`)}
+      ${statCard('i-amber', '%', d.avgAtt + '%', 'Overall Attendance')}
     </div>
     <div class="panel-grid">
       <div class="panel"><div class="panel-head"><h3>Attendance by Student</h3></div><div class="chart-box"><canvas id="attBar"></canvas></div></div>
@@ -169,25 +207,30 @@ async function viewDashboard() {
     <div class="panel">
       <div class="panel-head"><h3>Low Attendance Alerts (&lt; 75%)</h3></div>
       ${d.low.length ? `<div class="table-wrap"><table>
-        <thead><tr><th>Name</th><th>Reg No</th><th>Attendance</th><th>Status</th></tr></thead>
-        <tbody>${d.low.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.reg)}</td>
-          <td>${progressBar(s.stats.pct, 'var(--red)')}</td><td><span class="badge low">Low</span></td></tr>`).join('')}</tbody></table></div>`
+        <thead><tr><th>Roll</th><th>Name</th><th>Reg No</th><th>Attendance</th><th>Status</th></tr></thead>
+        <tbody>${d.low.map(s => `<tr><td>${esc(s.roll || '—')}</td><td>${esc(s.name)}</td><td>${esc(s.reg)}</td>
+          <td>${progressBar(s.stats.pct, attColor(s.stats.pct))}</td>
+          <td><span class="badge ${s.stats.pct < 60 ? 'low' : 'warn'}">${s.stats.pct < 60 ? 'Critical' : 'Low'}</span></td></tr>`).join('')}</tbody></table></div>`
         : `<div class="empty">No students below 75%. 🎉</div>`}
     </div>`;
+
+  // Live clock in the banner.
+  clearInterval(window._cbTimer);
+  window._cbTimer = setInterval(() => { const el = $('#cbClock'); if (el) el.textContent = new Date().toLocaleTimeString(); else clearInterval(window._cbTimer); }, 1000);
 
   if (d.students.length) {
     const tc = themeColors();
     charts.push(new Chart($('#attBar'), {
       type: 'bar',
-      data: { labels: d.students.map(s => s.reg), datasets: [{ label: 'Attendance %', data: d.students.map(s => s.stats.pct),
-        backgroundColor: d.students.map(s => s.stats.pct < 75 ? '#dc2626' : '#4f46e5'), borderRadius: 6 }] },
+      data: { labels: d.students.map(s => s.roll || s.reg), datasets: [{ label: 'Attendance %', data: d.students.map(s => s.stats.pct),
+        backgroundColor: d.students.map(s => s.stats.pct < 60 ? '#dc2626' : s.stats.pct < 75 ? '#f59e0b' : '#4f46e5'), borderRadius: 6 }] },
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
         scales: { y: { max: 100, grid: { color: tc.grid }, ticks: { color: tc.text } }, x: { grid: { display: false }, ticks: { color: tc.text } } } }
     }));
     const t = d.statusTotals;
     charts.push(new Chart($('#statusDoughnut'), {
       type: 'doughnut',
-      data: { labels: ['Present', 'Absent', 'OD'], datasets: [{ data: [t.present, t.absent, t.od], backgroundColor: ['#16a34a', '#dc2626', '#2563eb'], borderWidth: 0 }] },
+      data: { labels: ['Present', 'Absent', 'Late', 'OD'], datasets: [{ data: [t.present, t.absent, t.late, t.od], backgroundColor: ['#16a34a', '#dc2626', '#f59e0b', '#2563eb'], borderWidth: 0 }] },
       options: { responsive: true, maintainAspectRatio: false, cutout: '65%', plugins: { legend: { position: 'bottom', labels: { color: tc.text } } } }
     }));
   }
@@ -200,34 +243,37 @@ async function viewStudents() {
   studentsCache = await api('/students');
   content.innerHTML = `
     <div class="controls">
-      <input class="search" id="stuSearch" placeholder="Search name or reg no…" value="${esc(studentSearch)}" />
-      <button class="btn" id="addStu">+ Add Student</button>
+      <input class="search" id="stuSearch" placeholder="Search roll, name or reg no…" value="${esc(studentSearch)}" />
+      ${isAdmin() ? `<button class="btn" id="addStu">+ Add Student</button>` : ''}
     </div>
     <div class="panel"><div class="table-wrap"><table>
-      <thead><tr><th>Name</th><th>Reg No</th><th>Semester</th><th>Attendance</th><th>Avg Marks</th><th></th></tr></thead>
+      <thead><tr><th>Roll</th><th>Name</th><th>Reg No</th><th>Semester</th><th>Attendance</th><th>Avg Marks</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
       <tbody id="stuBody"></tbody></table></div></div>`;
-  $('#addStu').onclick = () => studentForm();
+  if (isAdmin()) $('#addStu').onclick = () => studentForm();
   $('#stuSearch').oninput = e => { studentSearch = e.target.value; drawStudents(); };
   drawStudents();
 }
 function drawStudents() {
   const q = studentSearch.trim().toLowerCase();
-  const rows = studentsCache.filter(s => !q || s.name.toLowerCase().includes(q) || s.reg.toLowerCase().includes(q));
+  const rows = studentsCache.filter(s => !q || s.name.toLowerCase().includes(q) || s.reg.toLowerCase().includes(q) || (s.roll || '').toLowerCase().includes(q));
   const body = $('#stuBody');
-  if (!rows.length) { body.innerHTML = `<tr><td colspan="6"><div class="empty">No students found.</div></td></tr>`; return; }
+  const cols = isAdmin() ? 7 : 6;
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="${cols}"><div class="empty">No students found.</div></td></tr>`; return; }
   body.innerHTML = rows.map(s => {
-    const col = s.stats.pct < 75 ? 'var(--red)' : 'var(--green)';
     return `<tr>
+      <td>${esc(s.roll || '—')}</td>
       <td><span class="name-cell">${avatarHTML(s.photo, s.name)}${esc(s.name)}</span></td><td>${esc(s.reg)}</td><td>Sem ${esc(s.sem)}</td>
-      <td>${progressBar(s.stats.pct, col)}</td>
+      <td>${progressBar(s.stats.pct, attColor(s.stats.pct))}</td>
       <td>${s.avgMark === null ? '—' : s.avgMark + '%'}</td>
-      <td><div class="btn-row">
+      ${isAdmin() ? `<td><div class="btn-row">
         <button class="btn sm outline" data-edit="${s.id}">Edit</button>
         <button class="btn sm outline" data-del="${s.id}">Delete</button>
-      </div></td></tr>`;
+      </div></td>` : ''}</tr>`;
   }).join('');
-  $$('[data-edit]', body).forEach(b => b.onclick = () => studentForm(b.dataset.edit));
-  $$('[data-del]', body).forEach(b => b.onclick = () => delStudent(b.dataset.del));
+  if (isAdmin()) {
+    $$('[data-edit]', body).forEach(b => b.onclick = () => studentForm(b.dataset.edit));
+    $$('[data-del]', body).forEach(b => b.onclick = () => delStudent(b.dataset.del));
+  }
 }
 function studentForm(id) {
   const s = studentsCache.find(x => String(x.id) === String(id)) || { name: '', reg: '', sem: 5, email: '', photo: null };
@@ -243,6 +289,7 @@ function studentForm(id) {
     </div>
     <div class="field"><label>Full Name</label><input id="f_name" value="${esc(s.name)}" placeholder="e.g. Priya Kumar" /></div>
     <div class="field-row">
+      <div class="field"><label>Roll No</label><input id="f_roll" value="${esc(s.roll||'')}" placeholder="01" /></div>
       <div class="field"><label>Register No</label><input id="f_reg" value="${esc(s.reg)}" placeholder="714024169001" /></div>
       <div class="field"><label>Semester</label><select id="f_sem">${[1,2,3,4,5,6,7,8].map(n => `<option ${n==s.sem?'selected':''}>${n}</option>`).join('')}</select></div>
     </div>
@@ -261,7 +308,7 @@ function studentForm(id) {
   $('#f_save').onclick = async () => {
     const name = $('#f_name').value.trim(), reg = $('#f_reg').value.trim();
     if (!name || !reg) return toast('Name and Register No are required');
-    const payload = { name, reg, sem: +$('#f_sem').value, email: $('#f_email').value.trim(), password: $('#f_pw').value };
+    const payload = { name, roll: $('#f_roll').value.trim(), reg, sem: +$('#f_sem').value, email: $('#f_email').value.trim(), password: $('#f_pw').value };
     if (photoState !== undefined) payload.photo = photoState; // only send when it changed
     try {
       if (id) await api('/students/' + id, { method: 'PUT', body: payload });
@@ -284,60 +331,200 @@ function delStudent(id) {
   };
 }
 
-/* ================= STAFF: ATTENDANCE ================= */
-let attState = { date: new Date().toISOString().slice(0, 10), subject: null, marks: {} };
-async function viewAttendance() {
-  const students = await api('/students');
-  if (!students.length) { content.innerHTML = `<div class="panel"><div class="empty">Add students first before marking attendance.</div></div>`; return; }
-  attState.subject = attState.subject || META.subjects[0];
+/* ================= FACULTY ================= */
+let facultyCache = [];
+async function viewFaculty() {
+  facultyCache = await api('/faculty');
   content.innerHTML = `
     <div class="controls">
-      <input type="date" id="a_date" value="${attState.date}" />
-      <select id="a_subject">${META.subjects.map(s => `<option ${s===attState.subject?'selected':''}>${esc(s)}</option>`).join('')}</select>
-      <button class="btn outline" id="allPresent">All Present</button>
-      <button class="btn outline" id="allAbsent">All Absent</button>
+      <h3 style="margin-right:auto">Teaching Staff</h3>
+      ${isAdmin() ? `<button class="btn" id="addFac">+ Add Faculty</button>` : ''}
     </div>
-    <div class="panel">
-      <div class="panel-head"><h3>Mark Attendance</h3><span id="existingTag"></span></div>
-      <div class="mark-list" id="markList"></div>
-      <button class="btn" id="saveAtt" style="margin-top:18px;width:100%">Save Attendance</button>
-    </div>`;
+    <div class="faculty-grid" id="facGrid"></div>`;
+  if (isAdmin()) $('#addFac').onclick = () => facultyForm();
+  drawFaculty();
+}
+function drawFaculty() {
+  const grid = $('#facGrid');
+  grid.innerHTML = facultyCache.map(f => `
+    <div class="panel faculty-card">
+      <div class="fc-top">
+        <span class="avatar initials">${esc(initials(f.name))}</span>
+        <div class="fc-id">
+          <h4>${esc(f.name)}</h4>
+          <span class="badge ${f.role === 'hod' ? 'good' : 'info'}">${f.role === 'hod' ? 'HOD' : 'Faculty'}</span>
+        </div>
+      </div>
+      <div class="fc-meta">
+        <div><span>Department</span><b>${esc(f.department || '—')}</b></div>
+        <div><span>Email</span><b>${esc(f.email)}</b></div>
+        <div><span>Subjects</span><b>${f.subjects.length ? f.subjects.map(s => esc(s.code)).join(', ') : '—'}</b></div>
+      </div>
+      ${isAdmin() ? `<div class="btn-row" style="margin-top:14px">
+        <button class="btn sm outline" data-edit="${f.id}">Edit</button>
+        <button class="btn sm ghost-danger" data-del="${f.id}">Delete</button>
+      </div>` : ''}
+    </div>`).join('');
+  if (isAdmin()) {
+    $$('[data-edit]', grid).forEach(b => b.onclick = () => facultyForm(b.dataset.edit));
+    $$('[data-del]', grid).forEach(b => b.onclick = () => delFaculty(b.dataset.del));
+  }
+}
+function facultyForm(id) {
+  const f = facultyCache.find(x => String(x.id) === String(id)) || { name: '', email: '', department: 'EE-VDT', role: 'faculty' };
+  openModal(id ? 'Edit Faculty' : 'Add Faculty', `
+    <div class="field"><label>Full Name</label><input id="ff_name" value="${esc(f.name)}" placeholder="e.g. Dr. A. Kumar" /></div>
+    <div class="field-row">
+      <div class="field"><label>Role</label><select id="ff_role">
+        <option value="faculty" ${f.role!=='hod'?'selected':''}>Faculty</option>
+        <option value="hod" ${f.role==='hod'?'selected':''}>HOD</option></select></div>
+      <div class="field"><label>Department</label><input id="ff_dept" value="${esc(f.department||'')}" placeholder="EE-VDT" /></div>
+    </div>
+    <div class="field"><label>Email ${id ? '' : '<span style="font-weight:400">(auto-generated if blank)</span>'}</label><input id="ff_email" value="${esc(f.email||'')}" placeholder="name@siet.edu" /></div>
+    <div class="field"><label>Password ${id ? '<span style="font-weight:400">(leave blank to keep current)</span>' : '<span style="font-weight:400">(default Faculty@123)</span>'}</label><input id="ff_pw" type="text" placeholder="${id ? 'unchanged' : 'Faculty@123'}" /></div>
+    <button class="btn" id="ff_save" style="width:100%">${id ? 'Save Changes' : 'Add Faculty'}</button>`);
+  $('#ff_save').onclick = async () => {
+    const name = $('#ff_name').value.trim();
+    if (!name) return toast('Name is required');
+    const payload = { name, email: $('#ff_email').value.trim(), department: $('#ff_dept').value.trim(), role: $('#ff_role').value, password: $('#ff_pw').value };
+    try {
+      if (id) await api('/faculty/' + id, { method: 'PUT', body: payload });
+      else await api('/faculty', { method: 'POST', body: payload });
+      closeModal(); toast(id ? 'Faculty updated' : 'Faculty added');
+      facultyCache = await api('/faculty'); drawFaculty();
+    } catch (e) { toast(e.message); }
+  };
+}
+function delFaculty(id) {
+  const f = facultyCache.find(x => String(x.id) === String(id));
+  openModal('Delete Faculty', `<p style="margin-bottom:18px">Delete <b>${esc(f.name)}</b>'s account?</p>
+    <div class="btn-row" style="justify-content:flex-end">
+      <button class="btn outline" id="fd_no">Cancel</button>
+      <button class="btn" id="fd_yes" style="background:var(--red)">Delete</button></div>`);
+  $('#fd_no').onclick = closeModal;
+  $('#fd_yes').onclick = async () => {
+    try { await api('/faculty/' + id, { method: 'DELETE' }); closeModal(); toast('Faculty deleted');
+      facultyCache = await api('/faculty'); drawFaculty(); } catch (e) { toast(e.message); }
+  };
+}
 
-  // Guards against out-of-order responses when date/subject change quickly.
+/* ================= STAFF: ATTENDANCE (9 periods / day) ================= */
+let attState = { date: new Date().toISOString().slice(0, 10), period: 1, subject: null, marks: {}, meta: null, readOnly: false };
+async function viewAttendance() {
+  const [students, mySubjects] = await Promise.all([api('/students'), api('/my/subjects')]);
+  if (!students.length) { content.innerHTML = `<div class="panel"><div class="empty">Add students first before marking attendance.</div></div>`; return; }
+  if (!mySubjects.length) { content.innerHTML = `<div class="panel"><div class="empty">No subjects are allocated to you.</div></div>`; return; }
+  attState.subject = attState.subject && mySubjects.some(s => s.name === attState.subject) ? attState.subject : mySubjects[0].name;
+
+  const periods = META.periods || [1,2,3,4,5,6,7,8,9];
+  content.innerHTML = `
+    <div class="controls">
+      <label class="ctl-field"><span>Date</span><input type="date" id="a_date" value="${attState.date}" /></label>
+      <label class="ctl-field"><span>Subject</span>
+        <select id="a_subject">${mySubjects.map(s => `<option value="${esc(s.name)}" ${s.name===attState.subject?'selected':''}>${esc(s.code)} — ${esc(s.name)}</option>`).join('')}</select>
+      </label>
+    </div>
+    <div class="period-strip" id="periodStrip">
+      ${periods.map(p => `<button class="period-btn ${p===attState.period?'active':''}" data-period="${p}">P${p}</button>`).join('')}
+    </div>
+    <div id="attSheet"></div>`;
+
   let attReq = 0;
-  async function syncFromExisting() {
+  async function load() {
     const my = ++attReq;
-    const { exists, marks } = await api(`/attendance?date=${attState.date}&subject=${encodeURIComponent(attState.subject)}`);
-    if (my !== attReq) return false; // superseded by a newer request
+    $('#attSheet').innerHTML = loadingHTML();
+    const { exists, meta, marks } = await api(`/attendance?date=${attState.date}&period=${attState.period}`);
+    if (my !== attReq) return; // superseded
+    // If a session already exists for this period, its subject wins (dropdown follows it
+    // when it's one this user can pick). For an empty period, use the current dropdown value.
+    if (exists && meta) {
+      attState.subject = meta.subject;
+      const opt = $$('#a_subject option').find(o => o.value === meta.subject);
+      if (opt) $('#a_subject').value = meta.subject;
+    } else {
+      attState.subject = $('#a_subject').value;
+    }
+    attState.meta = meta;
     attState.marks = {};
     students.forEach(s => attState.marks[s.id] = exists ? (marks[s.id] || 'absent') : 'present');
-    $('#existingTag').innerHTML = exists ? `<span class="badge info">Editing saved record</span>` : '';
-    return true;
+    // Read-only if locked, or the period was taken by a different faculty (unless I oversee).
+    const takenByOther = exists && meta && meta.facultyId && meta.facultyId !== auth.user.id;
+    attState.readOnly = !isOverseer() && !!(exists && meta && (meta.locked || takenByOther));
+    drawSheet(exists);
   }
-  function drawMarks() {
+
+  function drawSheet(exists) {
+    const subj = subjectByName(attState.subject) || { code: '', name: attState.subject, faculty: '' };
+    const m = attState.meta;
+    const locked = m && m.locked;
+    const facultyLine = m && m.faculty ? `Taken by ${esc(m.faculty)}` : `Allocated: ${esc(subj.faculty)}`;
+    $('#attSheet').innerHTML = `
+      <div class="att-header panel">
+        <div><h3>${esc(subj.name)}</h3><span class="att-sub">${esc(subj.code)} · ${facultyLine}</span></div>
+        <div class="att-meta">
+          <span class="badge info">${esc(attState.date)}</span>
+          <span class="badge info">Period ${attState.period}</span>
+          ${locked ? `<span class="badge low">🔒 Locked</span>` : (exists ? `<span class="badge good">Saved</span>` : `<span class="badge warn">Not taken</span>`)}
+        </div>
+      </div>
+      ${attState.readOnly ? `<div class="panel notice">${locked ? 'This period is locked.' : 'This period was taken by another faculty.'} ${isOverseer() ? '' : 'Only Admin or HOD can change it.'}</div>` : ''}
+      <div class="panel">
+        ${attState.readOnly ? '' : `<div class="controls" style="margin-bottom:12px">
+          <button class="btn outline sm" id="allPresent">All Present</button>
+          <button class="btn outline sm" id="allAbsent">All Absent</button>
+        </div>`}
+        <div class="mark-list" id="markList"></div>
+        <div class="btn-row" style="margin-top:18px">
+          ${attState.readOnly ? '' : `<button class="btn" id="saveAtt">Save Attendance</button>
+            <button class="btn outline" id="saveLock">Save &amp; End Period 🔒</button>`}
+          ${(locked && isOverseer()) ? `<button class="btn ghost-danger" id="unlockAtt">Unlock Period</button>` : ''}
+        </div>
+      </div>`;
+
     $('#markList').innerHTML = students.map(s => `
       <div class="mark-row">
+        <span class="m-roll">${esc(s.roll || '—')}</span>
         <span class="m-name">${esc(s.name)}</span><span class="m-reg">${esc(s.reg)}</span>
-        <div class="seg" data-stu="${s.id}">
-          <button data-v="present">Present</button><button data-v="absent">Absent</button><button data-v="od">OD</button>
+        <div class="seg ${attState.readOnly ? 'disabled' : ''}" data-stu="${s.id}">
+          <button data-v="present">Present</button><button data-v="absent">Absent</button><button data-v="late">Late</button><button data-v="od">OD</button>
         </div></div>`).join('');
     $$('.seg').forEach(seg => {
       const id = seg.dataset.stu;
       const paint = () => $$('button', seg).forEach(b => b.className = attState.marks[id] === b.dataset.v ? 'on-' + b.dataset.v : '');
       paint();
-      $$('button', seg).forEach(b => b.onclick = () => { attState.marks[id] = b.dataset.v; paint(); });
+      if (!attState.readOnly) $$('button', seg).forEach(b => b.onclick = () => { attState.marks[id] = b.dataset.v; paint(); });
     });
-  }
-  await syncFromExisting(); drawMarks();
 
-  $('#a_date').onchange = async e => { attState.date = e.target.value; if (await syncFromExisting()) drawMarks(); };
-  $('#a_subject').onchange = async e => { attState.subject = e.target.value; if (await syncFromExisting()) drawMarks(); };
-  $('#allPresent').onclick = () => { students.forEach(s => attState.marks[s.id] = 'present'); drawMarks(); };
-  $('#allAbsent').onclick = () => { students.forEach(s => attState.marks[s.id] = 'absent'); drawMarks(); };
-  $('#saveAtt').onclick = async () => {
-    try { await api('/attendance', { method: 'POST', body: { date: attState.date, subject: attState.subject, marks: attState.marks } });
-      toast('Attendance saved'); await syncFromExisting(); } catch (e) { toast(e.message); }
-  };
+    if (!attState.readOnly) {
+      $('#allPresent').onclick = () => { students.forEach(s => attState.marks[s.id] = 'present'); drawSheet(exists); };
+      $('#allAbsent').onclick = () => { students.forEach(s => attState.marks[s.id] = 'absent'); drawSheet(exists); };
+      $('#saveAtt').onclick = () => save(false);
+      $('#saveLock').onclick = () => save(true);
+    }
+    const unlockBtn = $('#unlockAtt');
+    if (unlockBtn) unlockBtn.onclick = async () => {
+      try { await api('/attendance/unlock', { method: 'POST', body: { date: attState.date, period: attState.period } });
+        toast('Period unlocked'); await load(); } catch (e) { toast(e.message); }
+    };
+  }
+
+  async function save(lock) {
+    try {
+      await api('/attendance', { method: 'POST', body: { date: attState.date, period: attState.period, subject: attState.subject, marks: attState.marks, lock } });
+      toast(lock ? 'Attendance saved & period ended' : 'Attendance saved');
+      await load();
+    } catch (e) { toast(e.message); }
+  }
+
+  $('#a_date').onchange = e => { attState.date = e.target.value; load(); };
+  $('#a_subject').onchange = e => { attState.subject = e.target.value; if (attState.meta) attState.meta.subject = e.target.value; drawSheet(!!attState.meta); };
+  $$('#periodStrip .period-btn').forEach(b => b.onclick = () => {
+    attState.period = Number(b.dataset.period);
+    $$('#periodStrip .period-btn').forEach(x => x.classList.toggle('active', x === b));
+    load();
+  });
+
+  await load();
 }
 
 /* ================= STAFF: MARKS ================= */
@@ -345,13 +532,13 @@ let marksSubject = null, marksType = null;
 async function viewMarks() {
   const students = await api('/students');
   if (!students.length) { content.innerHTML = `<div class="panel"><div class="empty">Add students first.</div></div>`; return; }
-  marksSubject = marksSubject || META.subjects[0];
+  marksSubject = marksSubject || subjectNames()[0];
   marksType = marksType || META.markTypes[0];
   // Default maximum score per assessment type: assignments are graded out of 10.
   const defaultMaxFor = t => t === 'Assignment' ? 10 : 100;
   content.innerHTML = `
     <div class="controls">
-      <select id="m_subject">${META.subjects.map(s => `<option ${s===marksSubject?'selected':''}>${esc(s)}</option>`).join('')}</select>
+      <select id="m_subject">${META.subjects.map(s => `<option value="${esc(s.name)}" ${s.name===marksSubject?'selected':''}>${esc(s.code)} — ${esc(s.name)}</option>`).join('')}</select>
       <select id="m_type">${META.markTypes.map(t => `<option ${t===marksType?'selected':''}>${esc(t)}</option>`).join('')}</select>
       <label id="m_subdateWrap" class="ctl-field" style="display:none">
         <span>Submission date</span>
@@ -446,14 +633,15 @@ function renderReportCard(area, r, canvasId) {
       ${avatarHTML(stu.photo, stu.name, 'avatar-lg')}
       <div class="student-header-meta">
         <h3>${esc(stu.name || '')}</h3>
-        <span>${esc(stu.reg || '')}${stu.sem ? ` · Sem ${esc(stu.sem)}` : ''}</span>
+        <span>${stu.roll ? `Roll ${esc(stu.roll)} · ` : ''}${esc(stu.reg || '')}${stu.sem ? ` · Sem ${esc(stu.sem)}` : ''}</span>
       </div>
     </div>
     <div class="stat-grid">
       ${statCard('i-green', '✓', st.pct + '%', 'Attendance')}
-      ${statCard('i-primary', '☰', st.present, 'Present Days')}
-      ${statCard('i-red', '✕', st.absent, 'Absent Days')}
-      ${statCard('i-blue', '◆', st.od, 'OD Days')}
+      ${statCard('i-primary', '☰', st.present, 'Present')}
+      ${statCard('i-red', '✕', st.absent, 'Absent')}
+      ${statCard('i-amber', '⏱', st.late, 'Late')}
+      ${statCard('i-blue', '◆', st.od, 'OD')}
     </div>
     ${st.pct < 75 && st.total ? `<div class="panel" style="border-color:var(--red)"><span class="badge low">⚠ Attendance below 75% — shortage warning</span></div>` : ''}
     <div class="panel-grid">
@@ -489,13 +677,14 @@ async function viewMyAttendance() {
       ${statCard('i-green', '✓', d.stats.pct + '%', 'Overall Attendance')}
       ${statCard('i-primary', '☰', d.stats.present, 'Present')}
       ${statCard('i-red', '✕', d.stats.absent, 'Absent')}
+      ${statCard('i-amber', '⏱', d.stats.late, 'Late')}
       ${statCard('i-blue', '◆', d.stats.od, 'OD')}
     </div>
     <div class="panel">
       <div class="panel-head"><h3>By Subject</h3></div>
-      <div class="table-wrap"><table><thead><tr><th>Subject</th><th>Present</th><th>Absent</th><th>OD</th><th>%</th></tr></thead>
-      <tbody>${d.bySubject.map(s => `<tr><td>${esc(s.sub)}</td><td>${s.present}</td><td>${s.absent}</td><td>${s.od}</td>
-        <td>${progressBar(s.pct, s.pct < 75 ? 'var(--red)' : 'var(--green)')}</td></tr>`).join('')}</tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>Subject</th><th>Present</th><th>Absent</th><th>Late</th><th>OD</th><th>%</th></tr></thead>
+      <tbody>${d.bySubject.filter(s => s.total).map(s => `<tr><td>${esc(s.sub)}</td><td>${s.present}</td><td>${s.absent}</td><td>${s.late}</td><td>${s.od}</td>
+        <td>${progressBar(s.pct, attColor(s.pct))}</td></tr>`).join('') || `<tr><td colspan="6"><div class="empty">No attendance recorded yet.</div></td></tr>`}</tbody></table></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h3>History</h3></div>
@@ -549,14 +738,14 @@ const appEl = $('#app');
 let loginRole = 'staff';
 
 const HINTS = {
-  staff: 'Demo — Admin: <b>admin@ece.edu / Admin@123</b><br>Staff: <b>staff@ece.edu / Staff@123</b>',
+  staff: 'Admin: <b>admin@ece.edu / Admin@123</b><br>HOD: <b>dhilip.kumar@siet.edu / Hod@123</b><br>Faculty: <b>boopathy@siet.edu / Faculty@123</b>',
   student: 'Register No: <b>714024169001</b> … <b>714024169054</b><br>Password: <b>Student@123</b>',
 };
 function setLoginRole(role) {
   loginRole = role;
   $$('.role-btn').forEach(b => b.classList.toggle('active', b.dataset.role === role));
   $('#idLabel').textContent = role === 'student' ? 'Register Number' : 'Email';
-  $('#loginId').placeholder = role === 'student' ? '714024169001' : 'admin@ece.edu';
+  $('#loginId').placeholder = role === 'student' ? '714024169001' : 'name@siet.edu';
   $('#loginHint').innerHTML = HINTS[role];
 }
 $$('.role-btn').forEach(b => b.onclick = () => setLoginRole(b.dataset.role));

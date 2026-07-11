@@ -1,8 +1,60 @@
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 
-const SUBJECTS = ['Digital Electronics', 'Signals & Systems', 'Microprocessors', 'Communication', 'VLSI Design'];
+// College / department identity (III B.E. EE-VDT, Semester V, 2026–2027).
+const COLLEGE = {
+  name: 'Sri Shakthi Institute of Engineering and Technology',
+  department: 'B.E. Electronics Engineering – VLSI Design and Technology (EE-VDT)',
+  programme: 'B.E. EE-VDT',
+  className: 'III B.E. EE-VDT',
+  academicYear: '2026–2027',
+  semester: 'V',
+  hod: 'Dr. P. Dhilip Kumar',
+};
+
+// Subject allocation: { code, name, faculty (display string) }.
+const SUBJECTS = [
+  { code: '21MA501',     name: 'Graph Theory',                                faculty: 'Dr. Beryl Ben' },
+  { code: '21EC501',     name: 'Environmental Science and Engineering (EVS)', faculty: 'Mrs. R. Vasanthi' },
+  { code: '21VL501',     name: 'Scripting Languages for FPGA (SL)',           faculty: 'Dr. P. Dhilip Kumar' },
+  { code: '21PEC05',     name: 'Synthesis and STA (Professional Elective 2)', faculty: 'Mrs. C. Prema' },
+  { code: '21EC521',     name: 'Digital Signal Processing (DSP)',             faculty: 'Mrs. S. Vimelatha' },
+  { code: '21VL522',     name: 'Embedded System Design (ESD)',                faculty: 'Mr. S. Boopathy' },
+  { code: '21EC521 LAB', name: 'Digital Signal Processing Laboratory',        faculty: 'Mrs. P. Eswari' },
+  { code: '21VL512',     name: 'Embedded System Design Laboratory',           faculty: 'Mr. S. Boopathy' },
+  { code: '21VL512 LAB', name: 'Scripting Languages Laboratory',              faculty: 'Dr. P. Dhilip Kumar' },
+  { code: '21VL511',     name: 'Engineering Exploration V',                   faculty: 'Mr. S. Boopathy' },
+  { code: '21DNS501',    name: 'Career Enhancement Program (CEP III)',        faculty: 'Verbal – Ms. Padmini, Quants – Mr. Manoj Kumar' },
+];
+
+// Teaching staff. Dr. P. Dhilip Kumar is the HOD (and also teaches); the rest are faculty.
+const FACULTY = [
+  { name: 'Dr. Beryl Ben',       department: 'Mathematics', role: 'faculty' },
+  { name: 'Mrs. R. Vasanthi',    department: 'EE-VDT',      role: 'faculty' },
+  { name: 'Dr. P. Dhilip Kumar', department: 'EE-VDT',      role: 'hod' },
+  { name: 'Mrs. C. Prema',       department: 'EE-VDT',      role: 'faculty' },
+  { name: 'Mrs. S. Vimelatha',   department: 'EE-VDT',      role: 'faculty' },
+  { name: 'Mr. S. Boopathy',     department: 'EE-VDT',      role: 'faculty' },
+  { name: 'Mrs. P. Eswari',      department: 'EE-VDT',      role: 'faculty' },
+  { name: 'Ms. Padmini',         department: 'English',     role: 'faculty' },
+  { name: 'Mr. Manoj Kumar',     department: 'Aptitude',    role: 'faculty' },
+];
+
+// Each teaching day has 9 fixed periods (no weekly timetable).
+const PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+
 const MARK_TYPES = ['Internal 1', 'Internal 2', 'Assignment', 'Semester'];
+
+// Build a login email from a faculty display name, e.g. "Dr. P. Dhilip Kumar" -> "dhilip.kumar@siet.edu".
+function facultyEmail(name) {
+  const slug = name
+    .replace(/^(Dr|Mr|Mrs|Ms)\.?\s+/i, '')   // drop title
+    .replace(/\b[A-Z]\.\s*/g, '')             // drop single-letter initials like "P."
+    .trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, '.')              // spaces/punct -> dot
+    .replace(/^\.+|\.+$/g, '');
+  return `${slug || 'faculty'}@siet.edu`;
+}
 
 // Official class roster: [reg_no, name]
 const STUDENTS = [
@@ -104,17 +156,33 @@ async function tx(fn) {
 
 /* ---------- schema ---------- */
 async function createSchema() {
+  // The attendance model changed from (date, subject) to a 9-period-per-day model.
+  // If the legacy attendance_sessions table exists without a `period` column, rebuild it.
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'attendance_sessions')
+         AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'attendance_sessions' AND column_name = 'period') THEN
+        DROP TABLE IF EXISTS attendance_records;
+        DROP TABLE IF EXISTS attendance_sessions;
+      END IF;
+    END $$;
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK (role IN ('admin','staff'))
+      department TEXT,
+      role TEXT NOT NULL CHECK (role IN ('admin','staff','hod','faculty'))
     );
     CREATE TABLE IF NOT EXISTS students (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
+      roll_no TEXT,
       reg_no TEXT UNIQUE NOT NULL,
       semester INTEGER NOT NULL DEFAULT 5,
       email TEXT,
@@ -124,13 +192,16 @@ async function createSchema() {
     CREATE TABLE IF NOT EXISTS attendance_sessions (
       id SERIAL PRIMARY KEY,
       date TEXT NOT NULL,
+      period INTEGER NOT NULL,
       subject TEXT NOT NULL,
-      UNIQUE (date, subject)
+      faculty_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      locked BOOLEAN NOT NULL DEFAULT false,
+      UNIQUE (date, period)
     );
     CREATE TABLE IF NOT EXISTS attendance_records (
       session_id INTEGER NOT NULL REFERENCES attendance_sessions(id) ON DELETE CASCADE,
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-      status TEXT NOT NULL CHECK (status IN ('present','absent','od')),
+      status TEXT NOT NULL CHECK (status IN ('present','absent','late','od')),
       PRIMARY KEY (session_id, student_id)
     );
     CREATE TABLE IF NOT EXISTS marks (
@@ -144,32 +215,62 @@ async function createSchema() {
       UNIQUE (student_id, subject, type)
     );
   `);
-  // Idempotent migrations for databases created before these columns existed.
+
+  // Idempotent migrations for databases created before these columns/roles existed.
   await pool.query('ALTER TABLE marks ADD COLUMN IF NOT EXISTS submission_date TEXT');
   await pool.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS photo TEXT');
+  await pool.query('ALTER TABLE students ADD COLUMN IF NOT EXISTS roll_no TEXT');
+  await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS department TEXT');
+  // Widen the role constraint so hod/faculty are allowed on pre-existing databases.
+  await pool.query('ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check');
+  await pool.query("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin','staff','hod','faculty'))");
+  // Allow the OD status on databases whose attendance_records predate it.
+  await pool.query('ALTER TABLE attendance_records DROP CONSTRAINT IF EXISTS attendance_records_status_check');
+  await pool.query("ALTER TABLE attendance_records ADD CONSTRAINT attendance_records_status_check CHECK (status IN ('present','absent','late','od'))");
 }
 
 /* ---------- seed ---------- */
+// Insert a user only if the email is not already present (idempotent).
+async function ensureUser(name, email, password, role, department) {
+  const exists = await one('SELECT id FROM users WHERE email = $1', [email]);
+  if (exists) return;
+  await pool.query(
+    'INSERT INTO users (name, email, password_hash, role, department) VALUES ($1,$2,$3,$4,$5)',
+    [name, email, bcrypt.hashSync(password, 10), role, department || null]);
+}
+
 async function seedIfEmpty() {
-  const userCount = Number((await one('SELECT COUNT(*)::int AS c FROM users')).c);
-  if (userCount === 0) {
-    await pool.query('INSERT INTO users (name, email, password_hash, role) VALUES ($1,$2,$3,$4)',
-      ['Department Admin', 'admin@ece.edu', bcrypt.hashSync('Admin@123', 10), 'admin']);
-    await pool.query('INSERT INTO users (name, email, password_hash, role) VALUES ($1,$2,$3,$4)',
-      ['Staff Member', 'staff@ece.edu', bcrypt.hashSync('Staff@123', 10), 'staff']);
+  // Admin (kept on the original address so existing logins keep working).
+  await ensureUser('Department Admin', 'admin@ece.edu', 'Admin@123', 'admin', COLLEGE.department);
+
+  // HOD + faculty accounts. Password depends on role.
+  for (const f of FACULTY) {
+    const pw = f.role === 'hod' ? 'Hod@123' : 'Faculty@123';
+    await ensureUser(f.name, facultyEmail(f.name), pw, f.role, f.department);
   }
 
   const studentCount = Number((await one('SELECT COUNT(*)::int AS c FROM students')).c);
   if (studentCount === 0) {
     const studentPw = bcrypt.hashSync('Student@123', 10);
+    let i = 0;
     for (const [reg, name] of STUDENTS) {
+      i += 1;
+      const rollNo = String(i).padStart(2, '0');
       const email = name.split(' ')[0].toLowerCase() + '@eevlsi.edu';
       await pool.query(
-        'INSERT INTO students (name, reg_no, semester, email, password_hash) VALUES ($1,$2,$3,$4,$5)',
-        [name, reg, 5, email, studentPw]);
+        'INSERT INTO students (name, roll_no, reg_no, semester, email, password_hash) VALUES ($1,$2,$3,$4,$5,$6)',
+        [name, rollNo, reg, 5, email, studentPw]);
     }
-    console.log(`🌱 Seeded admin, staff, and ${STUDENTS.length} students.`);
+    console.log(`🌱 Seeded ${STUDENTS.length} students.`);
   }
+
+  // Backfill roll numbers for any students that predate the roll_no column.
+  const missingRoll = await q('SELECT id FROM students WHERE roll_no IS NULL ORDER BY reg_no');
+  for (let j = 0; j < missingRoll.length; j++) {
+    await pool.query('UPDATE students SET roll_no = $1 WHERE id = $2', [String(j + 1).padStart(2, '0'), missingRoll[j].id]);
+  }
+
+  console.log(`🌱 Ensured admin + ${FACULTY.length} teaching staff (HOD: ${COLLEGE.hod}).`);
 }
 
 async function init() {
@@ -177,4 +278,7 @@ async function init() {
   await seedIfEmpty();
 }
 
-module.exports = { pool, q, one, tx, init, SUBJECTS, MARK_TYPES, STUDENTS };
+// Convenience: just the subject names, used where only the label matters.
+const SUBJECT_NAMES = SUBJECTS.map(s => s.name);
+
+module.exports = { pool, q, one, tx, init, COLLEGE, SUBJECTS, SUBJECT_NAMES, FACULTY, PERIODS, MARK_TYPES, STUDENTS, facultyEmail };

@@ -330,6 +330,51 @@ tbody tr:hover { background: var(--surface-2); }
 .seg button.on-present { background: var(--green); color: #fff; box-shadow: var(--shadow-xs); }
 .seg button.on-absent { background: var(--red); color: #fff; box-shadow: var(--shadow-xs); }
 .seg button.on-od { background: var(--blue); color: #fff; box-shadow: var(--shadow-xs); }
+.seg button.on-late { background: var(--amber); color: #fff; box-shadow: var(--shadow-xs); }
+.seg.disabled { opacity: .75; }
+.seg.disabled button { cursor: default; }
+.mark-row .m-roll { min-width: 34px; font-weight: 700; color: var(--text-soft); font-variant-numeric: tabular-nums; }
+.badge.late { background: var(--amber-soft); color: var(--amber); border-color: color-mix(in srgb, var(--amber) 22%, transparent); }
+
+/* ---------- College banner ---------- */
+.college-banner {
+  display: flex; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap;
+  background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 62%, #000));
+  color: #fff; border-radius: var(--r-xl); padding: var(--sp-5); margin-bottom: var(--sp-4); box-shadow: var(--shadow-md);
+}
+.college-banner .cb-main h2 { font-size: 20px; line-height: 1.25; margin: 0 0 4px; }
+.college-banner .cb-main p { opacity: .92; margin: 0 0 var(--sp-3); font-size: 14px; }
+.college-banner .cb-tags { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.college-banner .cb-tags span { background: rgba(255,255,255,.18); border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 600; }
+.college-banner .cb-date { text-align: right; display: flex; flex-direction: column; gap: 4px; }
+.college-banner .cb-date span { opacity: .9; font-size: 13px; }
+.college-banner .cb-date b { font-size: 20px; font-variant-numeric: tabular-nums; }
+
+/* ---------- Period strip ---------- */
+.period-strip { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.period-btn {
+  min-width: 54px; padding: 10px 14px; border-radius: var(--r-md); border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-soft); font-weight: 700; cursor: pointer;
+  transition: all var(--t-fast);
+}
+.period-btn:hover { border-color: var(--primary); color: var(--text); }
+.period-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; box-shadow: var(--shadow-sm); }
+
+/* ---------- Attendance sheet header ---------- */
+.att-header { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.att-header h3 { margin: 0; font-size: 17px; }
+.att-header .att-sub { color: var(--text-soft); font-size: 13px; }
+.att-header .att-meta { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.notice { border-left: 3px solid var(--amber); color: var(--text-soft); font-size: 14px; }
+
+/* ---------- Faculty cards ---------- */
+.faculty-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-4); }
+.faculty-card .fc-top { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.faculty-card .fc-id h4 { margin: 0 0 4px; font-size: 15px; }
+.faculty-card .fc-meta { display: flex; flex-direction: column; gap: var(--sp-2); }
+.faculty-card .fc-meta > div { display: flex; justify-content: space-between; gap: var(--sp-3); font-size: 13px; }
+.faculty-card .fc-meta span { color: var(--text-soft); }
+.faculty-card .fc-meta b { text-align: right; word-break: break-word; }
 
 /* ---------- Progress ---------- */
 .progress { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; width: 100%; min-width: 90px; }
