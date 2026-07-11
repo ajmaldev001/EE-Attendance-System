@@ -651,6 +651,14 @@ function renderReportCard(area, r, canvasId) {
         <div class="table-wrap"><table><thead><tr><th>Subject</th><th>Score</th><th>Grade</th></tr></thead>
         <tbody>${r.subjMarks.map(x => `<tr><td>${esc(x.sub)}</td><td>${x.pct === null ? '—' : x.pct + '%'}</td>
           <td>${x.pct === null ? '—' : `<span class="badge ${x.grade==='F'?'low':'good'}">${x.grade}</span>`}</td></tr>`).join('')}</tbody></table></div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Subject Allocation — Semester ${esc((META.college && META.college.semester) || 'V')}</h3></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>S.No</th><th>Course Code</th><th>Course Title</th><th>Faculty</th></tr></thead>
+        <tbody>${META.subjects.map((s, i) => `<tr>
+          <td>${i + 1}</td><td><b>${esc(s.code)}</b></td><td>${esc(s.name)}</td><td>${esc(s.faculty)}</td></tr>`).join('')}</tbody>
+      </table></div>
     </div>`;
   if (withMarks.length) {
     const tc = themeColors();
