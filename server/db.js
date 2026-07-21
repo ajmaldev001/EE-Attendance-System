@@ -252,6 +252,35 @@ async function createSchema() {
     await pool.query('ALTER TABLE users ADD COLUMN password_set BOOLEAN NOT NULL DEFAULT FALSE');
     await pool.query('UPDATE users SET password_set = TRUE');
   }
+
+  // Databases from before the 9-period redesign have attendance_sessions without
+  // a period column (UNIQUE(date,subject) era). That old sample data references
+  // retired subjects, so rebuild the attendance tables on the new shape.
+  const hasPeriod = await one(`
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'attendance_sessions' AND column_name = 'period'`);
+  if (!hasPeriod) {
+    await pool.query('DROP TABLE IF EXISTS attendance_records');
+    await pool.query('DROP TABLE IF EXISTS attendance_sessions');
+    await pool.query(`
+      CREATE TABLE attendance_sessions (
+        id SERIAL PRIMARY KEY,
+        date TEXT NOT NULL,
+        period INTEGER NOT NULL,
+        subject TEXT NOT NULL,
+        faculty_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        locked BOOLEAN NOT NULL DEFAULT false,
+        UNIQUE (date, period)
+      );
+      CREATE TABLE attendance_records (
+        session_id INTEGER NOT NULL REFERENCES attendance_sessions(id) ON DELETE CASCADE,
+        student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+        status TEXT NOT NULL CHECK (status IN ('present','absent','late','od')),
+        PRIMARY KEY (session_id, student_id)
+      );
+    `);
+    console.log('🔧 Rebuilt attendance tables for the 9-period schema.');
+  }
 }
 
 /* ---------- seed ---------- */
@@ -259,11 +288,13 @@ async function createSchema() {
 const isLateralReg = (reg) => /^7140241693\d\d$/.test(String(reg || ''));
 
 // Insert a user only if the email is not already present (idempotent).
+// Seeded accounts ship with a known password, so they are pre-activated
+// (password_set TRUE) — the request/approve flow is for UI-added faculty.
 async function ensureUser(name, email, password, role, department) {
   const exists = await one('SELECT id FROM users WHERE email = $1', [email]);
   if (exists) return;
   await pool.query(
-    'INSERT INTO users (name, email, password_hash, role, department) VALUES ($1,$2,$3,$4,$5)',
+    'INSERT INTO users (name, email, password_hash, role, department, password_set) VALUES ($1,$2,$3,$4,$5,TRUE)',
     [name, email, bcrypt.hashSync(password, 10), role, department || null]);
 }
 
