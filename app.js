@@ -271,7 +271,7 @@ async function viewStudents() {
   content.innerHTML = `
     <div class="controls">
       <input class="search" id="stuSearch" placeholder="Search roll, name or reg no…" value="${esc(studentSearch)}" />
-      ${isAdmin() ? `<button class="btn outline" id="promoteSem">Promote Semester ↑</button>
+      ${isAdmin() ? `<button class="btn outline" id="promoteSem">Semester ⇅</button>
       <button class="btn" id="addStu">+ Add Student</button>` : ''}
     </div>
     <div class="panel"><div class="table-wrap"><table>
@@ -280,21 +280,27 @@ async function viewStudents() {
   if (isAdmin()) {
     $('#addStu').onclick = () => studentForm();
     $('#promoteSem').onclick = () => {
-      openModal('Promote Semester', `
-        <p style="margin-bottom:18px">Move <b>all students</b> to the next semester?<br>
-        <span style="color:var(--text-soft);font-size:13px">e.g. Semester 5 → Semester 6. The dashboard banner updates automatically.</span></p>
+      const curSem = studentsCache[0] ? studentsCache[0].sem : '—';
+      openModal('Change Semester', `
+        <p style="margin-bottom:6px">The class is currently in <b>Semester ${esc(curSem)}</b>.</p>
+        <p style="margin-bottom:18px;color:var(--text-soft);font-size:13px">
+          Promote moves <b>all students</b> up one semester. Move Back undoes an accidental
+          promotion. The dashboard banner updates automatically.</p>
         <div class="btn-row" style="justify-content:flex-end">
           <button class="btn outline" id="pr_no">Cancel</button>
+          <button class="btn outline" id="pr_back">↓ Move Back</button>
           <button class="btn" id="pr_yes">Promote ↑</button></div>`);
       $('#pr_no').onclick = closeModal;
-      $('#pr_yes').onclick = async () => {
+      const shift = async (dir) => {
         try {
-          const { semester } = await api('/students/promote', { method: 'POST', body: {} });
-          closeModal(); toast(`Class promoted to Semester ${semester}`);
+          const { semester } = await api('/students/' + dir, { method: 'POST', body: {} });
+          closeModal(); toast(`Class ${dir === 'promote' ? 'promoted' : 'moved back'} to Semester ${semester}`);
           META = await api('/meta');
           viewStudents();
         } catch (e) { toast(e.message); }
       };
+      $('#pr_yes').onclick = () => shift('promote');
+      $('#pr_back').onclick = () => shift('demote');
     };
   }
   $('#stuSearch').oninput = e => { studentSearch = e.target.value; drawStudents(); };

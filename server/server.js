@@ -254,6 +254,13 @@ app.post('/api/students/promote', admin, wrap(async (req, res) => {
   res.json({ ok: true, semester: sem ? sem.s : null });
 }));
 
+// Undo a promotion: move the whole class back one semester (min 1). HOD/admin only.
+app.post('/api/students/demote', admin, wrap(async (req, res) => {
+  await pool.query('UPDATE students SET semester = GREATEST(semester - 1, 1)');
+  const sem = await one('SELECT mode() WITHIN GROUP (ORDER BY semester)::int AS s FROM students');
+  res.json({ ok: true, semester: sem ? sem.s : null });
+}));
+
 app.delete('/api/students/:id', admin, wrap(async (req, res) => {
   await pool.query('DELETE FROM students WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
