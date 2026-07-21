@@ -109,10 +109,11 @@ const N_FAC = { view: 'faculty', glyph: '♟', label: 'Faculty' };
 const N_ATT = { view: 'attendance', glyph: '✓', label: 'Attendance' };
 const N_MARKS = { view: 'marks', glyph: '✎', label: 'Marks' };
 const N_REP = { view: 'reports', glyph: '▤', label: 'Reports' };
+const N_NOTIF = { view: 'notifications', glyph: '🔔', label: 'Notifications' };
 const NAVS = {
-  admin:   [N_DASH, N_STU, N_FAC, N_ATT, N_MARKS, N_REP],
-  staff:   [N_DASH, N_STU, N_FAC, N_ATT, N_MARKS, N_REP],
-  hod:     [N_DASH, N_STU, N_FAC, N_ATT, N_REP],
+  admin:   [N_DASH, N_STU, N_FAC, N_ATT, N_MARKS, N_REP, N_NOTIF],
+  staff:   [N_DASH, N_STU, N_FAC, N_ATT, N_MARKS, N_REP, N_NOTIF],
+  hod:     [N_DASH, N_STU, N_FAC, N_ATT, N_MARKS, N_REP, N_NOTIF],
   advisor: [N_DASH, N_STU, N_ATT, N_MARKS, N_REP],
   faculty: [N_DASH, N_ATT, N_MARKS, N_REP],
   student: [
@@ -127,9 +128,9 @@ function navKey() {
   return NAVS[r] ? r : 'admin';
 }
 
-/* role capability helpers */
+/* role capability helpers — the HOD is the working admin of the department */
 const roleIs = (...rs) => rs.includes(auth.user.role);
-const isAdmin = () => roleIs('admin', 'staff');
+const isAdmin = () => roleIs('admin', 'staff', 'hod');
 const isOverseer = () => roleIs('admin', 'staff', 'hod'); // can view everything / unlock
 
 /* subject helpers (META.subjects are { code, name, faculty } objects) */
@@ -138,6 +139,9 @@ const subjectByName = (name) => META.subjects.find(s => s.name === name) || null
 
 /* traffic-light colour for an attendance %: 🟢 ≥75, 🟡 60–74, 🔴 <60 */
 function attColor(pct) { return pct >= 75 ? 'var(--green)' : pct >= 60 ? 'var(--amber)' : 'var(--red)'; }
+
+/* 12-hour clock, e.g. "5:07:42 PM" */
+const time12 = () => new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
 
 let currentView = null;
 function buildSidebar() {
@@ -148,18 +152,33 @@ function buildSidebar() {
   $$('.nav-item').forEach(b => b.onclick = () => { render(b.dataset.view); $('#sidebar').classList.remove('open'); });
 
   const u = auth.user;
-  const ROLE_LABEL = { admin: 'Administrator', staff: 'Administrator', hod: 'Head of Department', faculty: 'Faculty', student: 'Student' };
+  const ROLE_LABEL = { admin: 'Administrator', staff: 'Administrator', hod: 'Head of Department', advisor: 'Class Advisor', faculty: 'Faculty', student: 'Student' };
   $('#userName').textContent = u.name;
   $('#userRole').textContent = ROLE_LABEL[u.role] || u.role;
   $('#userAvatar').textContent = (u.name || 'U').trim().charAt(0).toUpperCase();
+  refreshNotifBadge();
+}
+
+// Pending-request count bubble on the Notifications nav item (HOD/admin only).
+async function refreshNotifBadge() {
+  const item = $('.nav-item[data-view=notifications]');
+  if (!item || !isAdmin()) return;
+  try {
+    const reqs = await api('/access/requests');
+    let b = $('.nav-badge', item);
+    if (reqs.length) {
+      if (!b) { b = document.createElement('span'); b.className = 'nav-badge'; item.appendChild(b); }
+      b.textContent = reqs.length;
+    } else if (b) b.remove();
+  } catch { /* non-fatal */ }
 }
 
 const VIEW_FN = {
-  dashboard: viewDashboard, students: viewStudents, faculty: viewFaculty, attendance: viewAttendance, marks: viewMarks, reports: viewReports,
+  dashboard: viewDashboard, students: viewStudents, faculty: viewFaculty, attendance: viewAttendance, marks: viewMarks, reports: viewReports, notifications: viewNotifications,
   mydash: viewMyDashboard, myattendance: viewMyAttendance, mymarks: viewMyMarks,
 };
 const VIEW_TITLE = {
-  dashboard: 'Dashboard', students: 'Students', faculty: 'Faculty', attendance: 'Attendance', marks: 'Marks', reports: 'Reports',
+  dashboard: 'Dashboard', students: 'Students', faculty: 'Faculty', attendance: 'Attendance', marks: 'Marks', reports: 'Reports', notifications: 'Notifications',
   mydash: 'My Dashboard', myattendance: 'My Attendance', mymarks: 'My Marks',
 };
 
@@ -191,15 +210,15 @@ async function viewDashboard() {
         <div class="cb-main">
           <h2 id="cbTextHead" style="display:none">${esc(c.name || '')}</h2>
           <p>${esc(c.department || '')}</p>
-          <div class="cb-tags">
-            <span>${esc(c.className || '')}</span>
-            <span>Semester ${esc(c.semester || '')}</span>
-            <span>${esc(c.academicYear || '')}</span>
-            <span>HOD: ${esc(c.hod || '')}</span>
-            ${c.classAdvisor ? `<span>Class Advisor: ${esc(c.classAdvisor)}</span>` : ''}
+          <div class="cb-grid">
+            <div class="cb-tile"><span>Class</span><b>${esc(c.className || '—')}</b></div>
+            <div class="cb-tile"><span>Semester</span><b>${esc(c.semester || '—')}</b></div>
+            <div class="cb-tile"><span>Academic Year</span><b>${esc(c.academicYear || '—')}</b></div>
+            <div class="cb-tile"><span>HOD</span><b>${esc(c.hod || '—')}</b></div>
+            ${c.classAdvisor ? `<div class="cb-tile"><span>Class Advisor</span><b>${esc(c.classAdvisor)}</b></div>` : ''}
           </div>
         </div>
-        <div class="cb-date"><span>${esc(dateStr)}</span><b id="cbClock">${esc(now.toLocaleTimeString())}</b></div>
+        <div class="cb-date"><span>${esc(dateStr)}</span><b id="cbClock">${esc(time12())}</b></div>
       </div>
     </div>
     <div class="stat-grid">
@@ -224,7 +243,7 @@ async function viewDashboard() {
 
   // Live clock in the banner.
   clearInterval(window._cbTimer);
-  window._cbTimer = setInterval(() => { const el = $('#cbClock'); if (el) el.textContent = new Date().toLocaleTimeString(); else clearInterval(window._cbTimer); }, 1000);
+  window._cbTimer = setInterval(() => { const el = $('#cbClock'); if (el) el.textContent = time12(); else clearInterval(window._cbTimer); }, 1000);
 
   if (d.students.length) {
     const tc = themeColors();
@@ -420,6 +439,38 @@ function delFaculty(id) {
   };
 }
 
+/* ================= HOD: NOTIFICATIONS ================= */
+async function viewNotifications() {
+  const reqs = await api('/access/requests');
+  content.innerHTML = `
+    <div class="panel">
+      <div class="panel-head"><h3>Access Requests</h3></div>
+      ${reqs.length ? `<div class="notif-list">${reqs.map(r => `
+        <div class="notif-row" data-req="${r.id}">
+          <span class="avatar initials">${esc(initials(r.name))}</span>
+          <div class="notif-meta">
+            <b>${esc(r.name)}</b>
+            <span>${esc(r.email)} · ${esc(r.department || '—')} · requested ${new Date(r.requested_at).toLocaleString('en-US', { hour12: true })}</span>
+            <em>Wants to activate their staff account and create a password.</em>
+          </div>
+          <div class="btn-row">
+            <button class="btn sm" data-approve="${r.id}">Approve</button>
+            <button class="btn sm ghost-danger" data-deny="${r.id}">Deny</button>
+          </div>
+        </div>`).join('')}</div>`
+      : `<div class="empty">No pending requests. When a staff member requests access from the login page, it appears here. 🔔</div>`}
+    </div>`;
+  const act = async (id, action) => {
+    try {
+      await api('/access/requests/' + id, { method: 'POST', body: { action } });
+      toast(action === 'approve' ? 'Approved — they can now create their password' : 'Request denied');
+      await viewNotifications(); refreshNotifBadge();
+    } catch (e) { toast(e.message); }
+  };
+  $$('[data-approve]').forEach(b => b.onclick = () => act(b.dataset.approve, 'approve'));
+  $$('[data-deny]').forEach(b => b.onclick = () => act(b.dataset.deny, 'deny'));
+}
+
 /* ================= STAFF: ATTENDANCE (9 periods / day) ================= */
 let attState = { date: new Date().toISOString().slice(0, 10), period: 1, subject: null, marks: {}, meta: null, readOnly: false };
 async function viewAttendance() {
@@ -547,11 +598,13 @@ async function viewMarks() {
   marksSubject = marksSubject || subjectNames()[0];
   marksType = marksType || META.markTypes[0];
   // Default maximum score per assessment type: assignments are graded out of 10.
-  const defaultMaxFor = t => t === 'Assignment' ? 10 : 100;
+  const isAssignType = t => /assignment/i.test(t || '');
+  const defaultMaxFor = t => isAssignType(t) ? 10 : 100;
   content.innerHTML = `
     <div class="controls">
       <select id="m_subject">${META.subjects.map(s => `<option value="${esc(s.name)}" ${s.name===marksSubject?'selected':''}>${esc(s.code)} — ${esc(s.name)}</option>`).join('')}</select>
       <select id="m_type">${META.markTypes.map(t => `<option ${t===marksType?'selected':''}>${esc(t)}</option>`).join('')}</select>
+      ${isAdmin() ? `<button class="btn sm outline" id="addType" type="button">+ Add Type</button>` : ''}
       <label id="m_subdateWrap" class="ctl-field" style="display:none">
         <span>Submission date</span>
         <input type="date" id="m_subdate" />
@@ -564,7 +617,7 @@ async function viewMarks() {
 
   function syncTypeUI() {
     // The submission date only applies to assignments.
-    $('#m_subdateWrap').style.display = marksType === 'Assignment' ? '' : 'none';
+    $('#m_subdateWrap').style.display = isAssignType(marksType) ? '' : 'none';
   }
 
   // Guards against out-of-order responses when subject/type change quickly.
@@ -593,6 +646,22 @@ async function viewMarks() {
   }
   $('#m_subject').onchange = e => { marksSubject = e.target.value; drawMarks(); };
   $('#m_type').onchange = e => { marksType = e.target.value; drawMarks(); };
+  if ($('#addType')) $('#addType').onclick = () => {
+    openModal('Add Assessment Type', `
+      <div class="field"><label>Type Name</label><input id="mt_name" placeholder="e.g. Internal 3, Assessment 1, Model Exam" /></div>
+      <button class="btn" id="mt_save" style="width:100%">Add Type</button>`);
+    $('#mt_save').onclick = async () => {
+      const name = $('#mt_name').value.trim();
+      if (!name) return toast('Enter a type name');
+      try {
+        const { markTypes } = await api('/mark-types', { method: 'POST', body: { name } });
+        META.markTypes = markTypes;
+        marksType = name;
+        closeModal(); toast(`"${name}" added`);
+        viewMarks();
+      } catch (e) { toast(e.message); }
+    };
+  };
   $('#saveMarks').onclick = async () => {
     const defMax = defaultMaxFor(marksType);
     const entries = $$('#marksBody tr').map(tr => ({
@@ -600,7 +669,7 @@ async function viewMarks() {
       obtained: $('.mk-obt', tr).value,
       max: $('.mk-max', tr).value || defMax,
     }));
-    const submissionDate = marksType === 'Assignment' ? ($('#m_subdate')?.value || null) : null;
+    const submissionDate = isAssignType(marksType) ? ($('#m_subdate')?.value || null) : null;
     try { await api('/marks', { method: 'POST', body: { subject: marksSubject, type: marksType, entries, submissionDate } });
       toast('Marks saved'); drawMarks(); } catch (e) { toast(e.message); }
   };
@@ -756,27 +825,70 @@ applyTheme(localStorage.getItem('ece_theme') || 'light');
 const loginScreen = $('#loginScreen');
 const appEl = $('#app');
 let loginRole = 'staff';
+// Staff sign-in is staged: email → (password | request access | waiting | create password)
+let loginStage = 'email';
+
+function setStage(stage, note) {
+  loginStage = stage;
+  $('#pwField').style.display = (stage === 'password' || stage === 'create' || loginRole === 'student') ? '' : 'none';
+  $('#pw2Field').style.display = stage === 'create' ? '' : 'none';
+  $('#pwLabel').textContent = stage === 'create' ? 'Create Password' : 'Password';
+  const labels = { email: 'Continue', password: 'Sign In', request: 'Request Access', pending: 'Check Status', create: 'Create Password & Sign In' };
+  $('#loginSubmit').textContent = loginRole === 'student' ? 'Sign In' : labels[stage];
+  const noteEl = $('#loginNote');
+  noteEl.style.display = note ? '' : 'none';
+  noteEl.textContent = note || '';
+  $('#loginError').textContent = '';
+}
 
 function setLoginRole(role) {
   loginRole = role;
   $$('.role-btn').forEach(b => b.classList.toggle('active', b.dataset.role === role));
   $('#idLabel').textContent = role === 'student' ? 'Register Number' : 'Email';
   $('#loginId').placeholder = role === 'student' ? '714024169001' : 'name@siet.edu';
+  setStage(role === 'student' ? 'password' : 'email');
 }
 $$('.role-btn').forEach(b => b.onclick = () => setLoginRole(b.dataset.role));
+// Changing the email restarts the staff flow.
+$('#loginId').oninput = () => { if (loginRole !== 'student' && loginStage !== 'email') setStage('email'); };
+
+async function finishLogin({ token, user }) {
+  auth = { token, user };
+  localStorage.setItem('token', token);
+  localStorage.setItem('user', JSON.stringify(user));
+  await enterApp();
+}
 
 $('#loginForm').onsubmit = async (e) => {
   e.preventDefault();
   $('#loginError').textContent = '';
   const identifier = $('#loginId').value.trim();
   const password = $('#loginPw').value;
-  if (!identifier || !password) { $('#loginError').textContent = 'Enter your credentials'; return; }
   try {
-    const { token, user } = await api('/login', { method: 'POST', body: { role: loginRole, identifier, password } });
-    auth = { token, user };
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
-    await enterApp();
+    if (loginRole === 'student') {
+      if (!identifier || !password) { $('#loginError').textContent = 'Enter your credentials'; return; }
+      return await finishLogin(await api('/login', { method: 'POST', body: { role: 'student', identifier, password } }));
+    }
+    // Staff flow
+    if (!identifier) { $('#loginError').textContent = 'Enter your email'; return; }
+    if (loginStage === 'email' || loginStage === 'pending') {
+      const { status } = await api('/access/check', { method: 'POST', body: { email: identifier } });
+      if (status === 'ready') setStage('password');
+      else if (status === 'need_request') setStage('request', 'First time here? Your HOD has added this email. Request access to continue.');
+      else if (status === 'pending') setStage('pending', '⏳ Waiting for HOD approval. Check back soon.');
+      else if (status === 'approved') setStage('create', '✅ Approved by HOD — create your password to finish.');
+      else $('#loginError').textContent = 'Email not found — ask your HOD to add you in the Faculty list.';
+    } else if (loginStage === 'password') {
+      if (!password) { $('#loginError').textContent = 'Enter your password'; return; }
+      await finishLogin(await api('/login', { method: 'POST', body: { role: 'staff', identifier, password } }));
+    } else if (loginStage === 'request') {
+      await api('/access/request', { method: 'POST', body: { email: identifier } });
+      setStage('pending', '⏳ Request sent! Your HOD will see it in Notifications. Once approved, come back and continue.');
+    } else if (loginStage === 'create') {
+      if (!password || password.length < 6) { $('#loginError').textContent = 'Password must be at least 6 characters'; return; }
+      if (password !== $('#loginPw2').value) { $('#loginError').textContent = 'Passwords do not match'; return; }
+      await finishLogin(await api('/access/set-password', { method: 'POST', body: { email: identifier, password } }));
+    }
   } catch (err) { $('#loginError').textContent = err.message; }
 };
 
@@ -787,6 +899,8 @@ function logout() {
   appEl.style.display = 'none';
   loginScreen.style.display = 'grid';
   $('#loginPw').value = '';
+  $('#loginPw2').value = '';
+  setLoginRole(loginRole);
 }
 $('#logoutBtn').onclick = logout;
 $('#menuToggle').onclick = () => $('#sidebar').classList.toggle('open');

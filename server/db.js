@@ -216,6 +216,17 @@ async function createSchema() {
       submission_date TEXT,
       UNIQUE (student_id, subject, type)
     );
+    CREATE TABLE IF NOT EXISTS mark_types (
+      id SERIAL PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL,
+      pos INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS access_requests (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','completed')),
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 
   // Idempotent migrations for databases created before these columns/roles existed.
@@ -230,6 +241,17 @@ async function createSchema() {
   // Allow the OD status on databases whose attendance_records predate it.
   await pool.query('ALTER TABLE attendance_records DROP CONSTRAINT IF EXISTS attendance_records_status_check');
   await pool.query("ALTER TABLE attendance_records ADD CONSTRAINT attendance_records_status_check CHECK (status IN ('present','absent','late','od'))");
+
+  // password_set: accounts that predate the approval flow keep working (TRUE);
+  // faculty added afterwards start at FALSE and go through request → approve →
+  // create-password. Grandfathering only runs the first time the column is added.
+  const hasPwSet = await one(`
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'users' AND column_name = 'password_set'`);
+  if (!hasPwSet) {
+    await pool.query('ALTER TABLE users ADD COLUMN password_set BOOLEAN NOT NULL DEFAULT FALSE');
+    await pool.query('UPDATE users SET password_set = TRUE');
+  }
 }
 
 /* ---------- seed ---------- */
@@ -283,6 +305,14 @@ async function seedIfEmpty() {
   const hasAdvisor = await one("SELECT id FROM users WHERE role = 'advisor' LIMIT 1");
   if (!hasAdvisor && COLLEGE.classAdvisor) {
     await pool.query("UPDATE users SET role = 'advisor' WHERE name = $1 AND role = 'faculty'", [COLLEGE.classAdvisor]);
+  }
+
+  // Seed the assessment types once; HOD can add more from the Marks view.
+  const typeCount = Number((await one('SELECT COUNT(*)::int AS c FROM mark_types')).c);
+  if (typeCount === 0) {
+    for (let t = 0; t < MARK_TYPES.length; t++) {
+      await pool.query('INSERT INTO mark_types (name, pos) VALUES ($1,$2) ON CONFLICT (name) DO NOTHING', [MARK_TYPES[t], t]);
+    }
   }
 
   console.log(`🌱 Ensured admin + ${FACULTY.length} teaching staff (HOD: ${COLLEGE.hod}).`);

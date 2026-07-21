@@ -17,20 +17,25 @@
         <p>Sign in to continue</p>
       </div>
       <div class="role-toggle">
-        <button class="role-btn active" data-role="staff">Staff / Faculty</button>
+        <button class="role-btn active" data-role="staff">Staff</button>
         <button class="role-btn" data-role="student">Student</button>
       </div>
       <form id="loginForm">
         <div class="field">
           <label id="idLabel">Email</label>
-          <input id="loginId" autocomplete="username" placeholder="admin@ece.edu" />
+          <input id="loginId" autocomplete="username" placeholder="name@siet.edu" />
         </div>
-        <div class="field">
-          <label>Password</label>
+        <div class="field" id="pwField">
+          <label id="pwLabel">Password</label>
           <input id="loginPw" type="password" autocomplete="current-password" placeholder="••••••••" />
         </div>
+        <div class="field" id="pw2Field" style="display:none">
+          <label>Confirm Password</label>
+          <input id="loginPw2" type="password" autocomplete="new-password" placeholder="••••••••" />
+        </div>
+        <div id="loginNote" class="login-note" style="display:none"></div>
         <div id="loginError" class="login-error"></div>
-        <button type="submit" class="btn" style="width:100%">Sign In</button>
+        <button type="submit" class="btn" style="width:100%" id="loginSubmit">Continue</button>
       </form>
     </div>
   </div>

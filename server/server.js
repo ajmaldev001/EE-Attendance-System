@@ -62,14 +62,29 @@ function subjectsForUser(user) {
   return SUBJECTS.filter(s => s.faculty.toLowerCase().includes(needle));
 }
 
-// College identity with the class advisor resolved from whoever holds the role.
+// College identity with the class advisor resolved from whoever holds the role,
+// and the semester/class name derived from the students' current semester.
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
 async function collegeInfo() {
   const adv = await one("SELECT name FROM users WHERE role = 'advisor' ORDER BY id LIMIT 1");
-  return { ...COLLEGE, classAdvisor: adv ? adv.name : COLLEGE.classAdvisor };
+  const sem = await one('SELECT mode() WITHIN GROUP (ORDER BY semester)::int AS s FROM students');
+  const s = sem && sem.s ? sem.s : null;
+  return {
+    ...COLLEGE,
+    classAdvisor: adv ? adv.name : COLLEGE.classAdvisor,
+    semester: s ? (ROMAN[s] || String(s)) : COLLEGE.semester,
+    className: s ? `${ROMAN[Math.ceil(s / 2)]} ${COLLEGE.programme}` : COLLEGE.className,
+  };
+}
+
+// Assessment types now live in the DB so the HOD can add more (Internal 3, …).
+async function markTypeList() {
+  const rows = await q('SELECT name FROM mark_types ORDER BY pos, id');
+  return rows.length ? rows.map(r => r.name) : MARK_TYPES;
 }
 
 /* ================= AUTH ================= */
-app.get('/api/meta', wrap(async (req, res) => res.json({ college: await collegeInfo(), subjects: SUBJECTS, periods: PERIODS, markTypes: MARK_TYPES })));
+app.get('/api/meta', wrap(async (req, res) => res.json({ college: await collegeInfo(), subjects: SUBJECTS, periods: PERIODS, markTypes: await markTypeList() })));
 
 app.post('/api/login', wrap(async (req, res) => {
   const { role, identifier, password } = req.body || {};
@@ -83,8 +98,50 @@ app.post('/api/login', wrap(async (req, res) => {
   }
   const u = await one('SELECT * FROM users WHERE email = $1', [identifier.trim().toLowerCase()]);
   if (!u || !bcrypt.compareSync(password, u.password_hash)) return res.status(401).json({ error: 'Invalid email or password' });
+  if (u.password_set === false) return res.status(403).json({ error: 'Account not activated yet — request access and wait for HOD approval' });
   const user = { id: u.id, role: u.role, name: u.name, email: u.email, department: u.department || null };
   return res.json({ token: signToken(user), user });
+}));
+
+/* ---------- Staff access-request flow ----------
+   HOD adds a faculty (no password) → staff enters their email → request goes
+   to the HOD's Notifications → HOD approves → staff creates their password. */
+app.post('/api/access/check', wrap(async (req, res) => {
+  const email = (req.body?.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  const u = await one("SELECT * FROM users WHERE email = $1 AND role IN ('admin','staff','hod','faculty','advisor')", [email]);
+  if (!u) return res.json({ status: 'unknown' });
+  if (u.password_set) return res.json({ status: 'ready' });
+  const r = await one('SELECT status FROM access_requests WHERE user_id = $1', [u.id]);
+  if (!r) return res.json({ status: 'need_request' });
+  return res.json({ status: r.status === 'approved' ? 'approved' : 'pending' });
+}));
+
+app.post('/api/access/request', wrap(async (req, res) => {
+  const email = (req.body?.email || '').trim().toLowerCase();
+  const u = await one("SELECT * FROM users WHERE email = $1 AND role IN ('admin','staff','hod','faculty','advisor')", [email]);
+  if (!u) return res.status(404).json({ error: 'Email not found — ask your HOD to add you first' });
+  if (u.password_set) return res.status(409).json({ error: 'Account already active — just sign in' });
+  await pool.query(`
+    INSERT INTO access_requests (user_id, status) VALUES ($1, 'pending')
+    ON CONFLICT (user_id) DO NOTHING`, [u.id]);
+  res.json({ status: 'pending' });
+}));
+
+app.post('/api/access/set-password', wrap(async (req, res) => {
+  const email = (req.body?.email || '').trim().toLowerCase();
+  const { password } = req.body || {};
+  if (!password || password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const u = await one('SELECT * FROM users WHERE email = $1', [email]);
+  if (!u) return res.status(404).json({ error: 'Email not found' });
+  const r = await one("SELECT * FROM access_requests WHERE user_id = $1 AND status = 'approved'", [u.id]);
+  if (!r) return res.status(403).json({ error: 'Not approved yet — wait for HOD approval' });
+  await tx(async (client) => {
+    await client.query('UPDATE users SET password_hash = $1, password_set = TRUE WHERE id = $2', [bcrypt.hashSync(password, 10), u.id]);
+    await client.query("UPDATE access_requests SET status = 'completed' WHERE user_id = $1", [u.id]);
+  });
+  const user = { id: u.id, role: u.role, name: u.name, email: u.email, department: u.department || null };
+  res.json({ token: signToken(user), user });
 }));
 
 app.get('/api/me', authenticate, (req, res) => res.json({ user: req.user }));
@@ -93,8 +150,30 @@ app.get('/api/me', authenticate, (req, res) => res.json({ user: req.user }));
 // admin      → full control (manage students, faculty, subjects)
 // adminHod   → admin + HOD oversight (unlock attendance, view everything)
 // staff      → anyone who works with class data: admin, HOD, faculty
-const admin = [authenticate, requireRole('admin')];
+// The HOD is the working admin of the department, so both share full powers.
+const admin = [authenticate, requireRole('admin', 'hod')];
 const adminHod = [authenticate, requireRole('admin', 'hod')];
+
+// HOD notifications: pending access requests + approve/deny.
+app.get('/api/access/requests', admin, wrap(async (req, res) => {
+  const rows = await q(`
+    SELECT r.id, r.status, r.requested_at, u.name, u.email, u.role, u.department
+    FROM access_requests r JOIN users u ON u.id = r.user_id
+    WHERE r.status = 'pending' ORDER BY r.requested_at`);
+  res.json(rows);
+}));
+
+app.post('/api/access/requests/:id', admin, wrap(async (req, res) => {
+  const { action } = req.body || {};
+  if (action === 'approve') {
+    await pool.query("UPDATE access_requests SET status = 'approved' WHERE id = $1 AND status = 'pending'", [req.params.id]);
+  } else if (action === 'deny') {
+    await pool.query("DELETE FROM access_requests WHERE id = $1 AND status = 'pending'", [req.params.id]);
+  } else {
+    return res.status(400).json({ error: 'action must be approve or deny' });
+  }
+  res.json({ ok: true });
+}));
 const staff = [authenticate, requireRole('admin', 'staff', 'hod', 'faculty', 'advisor')];
 
 async function studentWithStats(s) {
@@ -168,6 +247,13 @@ app.put('/api/students/:id', admin, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Promote the whole class to the next semester (max 8). HOD/admin only.
+app.post('/api/students/promote', admin, wrap(async (req, res) => {
+  await pool.query('UPDATE students SET semester = LEAST(semester + 1, 8)');
+  const sem = await one('SELECT mode() WITHIN GROUP (ORDER BY semester)::int AS s FROM students');
+  res.json({ ok: true, semester: sem ? sem.s : null });
+}));
+
 app.delete('/api/students/:id', admin, wrap(async (req, res) => {
   await pool.query('DELETE FROM students WHERE id = $1', [req.params.id]);
   res.json({ ok: true });
@@ -191,9 +277,12 @@ app.post('/api/faculty', admin, wrap(async (req, res) => {
   const dup = await one('SELECT id FROM users WHERE email = $1', [mail]);
   if (dup) return res.status(409).json({ error: 'Email already exists' });
   const r = ['hod', 'advisor'].includes(role) ? role : 'faculty';
-  const pw = bcrypt.hashSync(password && password.length ? password : (r === 'hod' ? 'Hod@123' : 'Faculty@123'), 10);
-  const row = await one('INSERT INTO users (name, email, password_hash, role, department) VALUES ($1,$2,$3,$4,$5) RETURNING id',
-    [name.trim(), mail, pw, r, (department || '').trim() || null]);
+  // If the HOD types a password the account is ready immediately; otherwise the
+  // staff member activates it via the request → approve → create-password flow.
+  const hasPw = !!(password && password.length);
+  const pw = bcrypt.hashSync(hasPw ? password : (r === 'hod' ? 'Hod@123' : 'Faculty@123'), 10);
+  const row = await one('INSERT INTO users (name, email, password_hash, role, department, password_set) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+    [name.trim(), mail, pw, r, (department || '').trim() || null, hasPw]);
   res.status(201).json({ id: row.id, email: mail });
 }));
 
@@ -207,8 +296,9 @@ app.put('/api/faculty/:id', admin, wrap(async (req, res) => {
   }
   const pw = password && password.length ? bcrypt.hashSync(password, 10) : u.password_hash;
   const r = role ? (['hod', 'advisor'].includes(role) ? role : 'faculty') : u.role;
-  await pool.query('UPDATE users SET name=$1, email=$2, department=$3, role=$4, password_hash=$5 WHERE id=$6',
-    [name ?? u.name, (email ?? u.email).trim().toLowerCase(), department ?? u.department, r, pw, u.id]);
+  const pwSet = (password && password.length) ? true : u.password_set;
+  await pool.query('UPDATE users SET name=$1, email=$2, department=$3, role=$4, password_hash=$5, password_set=$6 WHERE id=$7',
+    [name ?? u.name, (email ?? u.email).trim().toLowerCase(), department ?? u.department, r, pw, pwSet, u.id]);
   res.json({ ok: true });
 }));
 
@@ -311,6 +401,17 @@ app.post('/api/attendance/unlock', adminHod, wrap(async (req, res) => {
 }));
 
 // Marks
+// Add a new assessment type (Internal 3, Assessment 1, …). HOD/admin only.
+app.post('/api/mark-types', admin, wrap(async (req, res) => {
+  const name = (req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Type name required' });
+  const dup = await one('SELECT id FROM mark_types WHERE LOWER(name) = LOWER($1)', [name]);
+  if (dup) return res.status(409).json({ error: 'That type already exists' });
+  const posRow = await one('SELECT COALESCE(MAX(pos), 0) + 1 AS p FROM mark_types');
+  await pool.query('INSERT INTO mark_types (name, pos) VALUES ($1,$2)', [name, posRow.p]);
+  res.status(201).json({ markTypes: await markTypeList() });
+}));
+
 app.get('/api/marks', staff, wrap(async (req, res) => {
   const { subject, type } = req.query;
   if (!subject || !type) return res.status(400).json({ error: 'subject and type required' });
@@ -411,7 +512,7 @@ app.get('/api/me/marks', studentOnly, wrap(async (req, res) => {
     const pct = ms.length ? Math.round(ms.reduce((a, m) => a + (m.obtained / m.max) * 100, 0) / ms.length) : null;
     return { sub, byType, pct, grade: pct === null ? null : gradeFor(pct) };
   });
-  res.json({ markTypes: MARK_TYPES, bySubject });
+  res.json({ markTypes: await markTypeList(), bySubject });
 }));
 
 /* ================= STATIC FRONTEND ================= */
