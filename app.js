@@ -156,6 +156,7 @@ function buildSidebar() {
   $('#userName').textContent = u.name;
   $('#userRole').textContent = ROLE_LABEL[u.role] || u.role;
   $('#userAvatar').textContent = (u.name || 'U').trim().charAt(0).toUpperCase();
+  $('#changePwBtn').style.display = u.role === 'student' ? 'none' : '';
   refreshNotifBadge();
 }
 
@@ -929,6 +930,24 @@ function logout() {
   setLoginRole(loginRole);
 }
 $('#logoutBtn').onclick = logout;
+
+/* Change own password (staff/admin/HOD/faculty). Hidden for students. */
+$('#changePwBtn').onclick = () => {
+  openModal('Change Password', `
+    <div class="field"><label>Current Password</label><input id="cp_cur" type="password" autocomplete="current-password" /></div>
+    <div class="field"><label>New Password</label><input id="cp_new" type="password" autocomplete="new-password" placeholder="min 6 characters" /></div>
+    <div class="field"><label>Confirm New Password</label><input id="cp_new2" type="password" autocomplete="new-password" /></div>
+    <button class="btn" id="cp_save" style="width:100%">Update Password</button>`);
+  $('#cp_save').onclick = async () => {
+    const cur = $('#cp_cur').value, nw = $('#cp_new').value;
+    if (!nw || nw.length < 6) return toast('New password must be at least 6 characters');
+    if (nw !== $('#cp_new2').value) return toast('Passwords do not match');
+    try {
+      await api('/me/password', { method: 'POST', body: { currentPassword: cur, newPassword: nw } });
+      closeModal(); toast('Password updated ✔ Use it from your next login');
+    } catch (e) { toast(e.message); }
+  };
+};
 $('#menuToggle').onclick = () => $('#sidebar').classList.toggle('open');
 
 async function enterApp() {

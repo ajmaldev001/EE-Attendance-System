@@ -146,6 +146,19 @@ app.post('/api/access/set-password', wrap(async (req, res) => {
 
 app.get('/api/me', authenticate, (req, res) => res.json({ user: req.user }));
 
+// Change own password (staff/admin/HOD/faculty — accounts in the users table).
+app.post('/api/me/password', authenticate, wrap(async (req, res) => {
+  if (req.user.role === 'student') return res.status(403).json({ error: 'Students: ask your HOD to reset your password' });
+  const { currentPassword, newPassword } = req.body || {};
+  if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
+  const u = await one('SELECT * FROM users WHERE id = $1', [req.user.id]);
+  if (!u || !bcrypt.compareSync(currentPassword || '', u.password_hash)) {
+    return res.status(401).json({ error: 'Current password is incorrect' });
+  }
+  await pool.query('UPDATE users SET password_hash = $1, password_set = TRUE WHERE id = $2', [bcrypt.hashSync(newPassword, 10), u.id]);
+  res.json({ ok: true });
+}));
+
 /* ================= ROLE GROUPS ================= */
 // admin      → full control (manage students, faculty, subjects)
 // adminHod   → admin + HOD oversight (unlock attendance, view everything)
