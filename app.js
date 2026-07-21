@@ -271,12 +271,32 @@ async function viewStudents() {
   content.innerHTML = `
     <div class="controls">
       <input class="search" id="stuSearch" placeholder="Search roll, name or reg no…" value="${esc(studentSearch)}" />
-      ${isAdmin() ? `<button class="btn" id="addStu">+ Add Student</button>` : ''}
+      ${isAdmin() ? `<button class="btn outline" id="promoteSem">Promote Semester ↑</button>
+      <button class="btn" id="addStu">+ Add Student</button>` : ''}
     </div>
     <div class="panel"><div class="table-wrap"><table>
       <thead><tr><th>Roll</th><th>Name</th><th>Reg No</th><th>Semester</th><th>Attendance</th><th>Avg Marks</th>${isAdmin() ? '<th></th>' : ''}</tr></thead>
       <tbody id="stuBody"></tbody></table></div></div>`;
-  if (isAdmin()) $('#addStu').onclick = () => studentForm();
+  if (isAdmin()) {
+    $('#addStu').onclick = () => studentForm();
+    $('#promoteSem').onclick = () => {
+      openModal('Promote Semester', `
+        <p style="margin-bottom:18px">Move <b>all students</b> to the next semester?<br>
+        <span style="color:var(--text-soft);font-size:13px">e.g. Semester 5 → Semester 6. The dashboard banner updates automatically.</span></p>
+        <div class="btn-row" style="justify-content:flex-end">
+          <button class="btn outline" id="pr_no">Cancel</button>
+          <button class="btn" id="pr_yes">Promote ↑</button></div>`);
+      $('#pr_no').onclick = closeModal;
+      $('#pr_yes').onclick = async () => {
+        try {
+          const { semester } = await api('/students/promote', { method: 'POST', body: {} });
+          closeModal(); toast(`Class promoted to Semester ${semester}`);
+          META = await api('/meta');
+          viewStudents();
+        } catch (e) { toast(e.message); }
+      };
+    };
+  }
   $('#stuSearch').oninput = e => { studentSearch = e.target.value; drawStudents(); };
   drawStudents();
 }
