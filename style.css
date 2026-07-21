@@ -338,30 +338,60 @@ tbody tr:hover { background: var(--surface-2); }
 
 /* ---------- College banner ---------- */
 .college-banner {
-  background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 62%, #000));
+  background: linear-gradient(125deg,
+    color-mix(in srgb, var(--primary) 90%, #fff) 0%,
+    var(--primary) 45%,
+    color-mix(in srgb, var(--primary) 55%, #1e1b4b) 100%);
   color: #fff; border-radius: var(--r-xl); margin-bottom: var(--sp-4); box-shadow: var(--shadow-md);
   overflow: hidden;
 }
-.college-banner .cb-img { background: #fff; padding: 10px 16px; border-bottom: 1px solid var(--border); }
-.college-banner .cb-img img { display: block; width: 100%; max-height: 96px; object-fit: contain; }
+.college-banner .cb-img { background: #fff; padding: 12px 20px; }
+.college-banner .cb-img img { display: block; width: 100%; max-height: 88px; object-fit: contain; margin: 0 auto; }
 .college-banner .cb-body {
-  display: flex; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; padding: var(--sp-5);
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: var(--sp-4); flex-wrap: wrap; padding: var(--sp-4) var(--sp-6) var(--sp-6);
 }
-.college-banner .cb-main h2 { font-size: 20px; line-height: 1.25; margin: 0 0 4px; }
-.college-banner .cb-main p { opacity: .92; margin: 0 0 var(--sp-3); font-size: 14px; }
+.college-banner .cb-main { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; flex: 1 1 480px; }
+.college-banner .cb-main h2 { font-size: 20px; line-height: 1.25; margin: 0; }
+.college-banner .cb-main p {
+  opacity: .95; margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .2px;
+}
 .college-banner .cb-tags { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .college-banner .cb-tags span { background: rgba(255,255,255,.18); border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 600; }
 .college-banner .cb-grid { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .college-banner .cb-tile {
-  background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22);
-  border-radius: var(--r-md); padding: 8px 14px; min-width: 110px;
-  display: flex; flex-direction: column; gap: 2px; backdrop-filter: blur(4px);
+  background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.25);
+  border-radius: var(--r-lg); padding: 10px 16px; min-width: 118px;
+  display: flex; flex-direction: column; gap: 3px; backdrop-filter: blur(6px);
+  box-shadow: 0 2px 8px rgba(0,0,0,.12);
 }
-.college-banner .cb-tile span { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; opacity: .75; font-weight: 600; }
-.college-banner .cb-tile b { font-size: 13px; font-weight: 700; }
-.college-banner .cb-date { text-align: right; display: flex; flex-direction: column; gap: 4px; }
-.college-banner .cb-date span { opacity: .9; font-size: 13px; }
-.college-banner .cb-date b { font-size: 24px; font-variant-numeric: tabular-nums; letter-spacing: .5px; }
+.college-banner .cb-tile span { font-size: 10px; text-transform: uppercase; letter-spacing: .9px; opacity: .78; font-weight: 700; }
+.college-banner .cb-tile b { font-size: 14px; font-weight: 700; }
+.college-banner .cb-date {
+  background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.25);
+  border-radius: var(--r-lg); padding: 10px 18px; margin-left: auto;
+  text-align: right; display: flex; flex-direction: column; gap: 2px;
+  backdrop-filter: blur(6px); box-shadow: 0 2px 8px rgba(0,0,0,.12);
+}
+.college-banner .cb-date::before {
+  content: 'Today'; font-size: 10px; text-transform: uppercase;
+  letter-spacing: .9px; opacity: .78; font-weight: 700;
+}
+.college-banner .cb-date span { opacity: .95; font-size: 13px; font-weight: 600; }
+.college-banner .cb-date b { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .5px; }
+/* When the clock card wraps under the tiles, turn it into a slim full-width
+   strip instead of a floating box with dead space beside it. */
+@media (max-width: 1180px) {
+  .college-banner .cb-date {
+    width: 100%; flex-direction: row; align-items: baseline; justify-content: flex-end;
+    gap: var(--sp-3); padding: 8px 16px;
+  }
+  .college-banner .cb-date::before { margin-right: auto; }
+  .college-banner .cb-date b { font-size: 20px; }
+}
+@media (max-width: 700px) {
+  .college-banner .cb-body { padding: var(--sp-4); }
+}
 
 /* ---------- Notifications ---------- */
 .nav-item { position: relative; }
