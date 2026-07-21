@@ -12,8 +12,27 @@ app.use(cors());
 // Raise the limit so student photos (small base64 data URLs) fit comfortably.
 app.use(express.json({ limit: '5mb' }));
 
-/* small async wrapper so thrown errors return JSON 500 instead of crashing */
+/* Is this error the database being unreachable/paused (vs a real app bug)? */
+function isDbDown(err) {
+  const m = (err && err.message || '').toLowerCase();
+  return ['enotfound', 'econnrefused', 'etimedout', 'econnreset', 'timeout'].includes(err && err.code) ||
+    m.includes('tenant or user not found') || m.includes('tenant/user') ||
+    m.includes('econnrefused') || m.includes('enotfound') || m.includes('terminating connection');
+}
+
+// Log a repeated message at most once per minute so a paused DB doesn't flood the logs.
+let _lastDbLog = 0;
+function throttledWarn(msg) {
+  const now = Date.now();
+  if (now - _lastDbLog > 60000) { _lastDbLog = now; console.warn(msg); }
+}
+
+/* small async wrapper so thrown errors return JSON instead of crashing */
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch(err => {
+  if (isDbDown(err)) {
+    throttledWarn('⚠️  Database unreachable (paused or down). Serving 503 until it is back.');
+    return res.status(503).json({ error: 'The database is temporarily unavailable. Please try again shortly.' });
+  }
   console.error(err);
   res.status(500).json({ error: err.message || 'Server error' });
 });
@@ -543,9 +562,24 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'index.html')
 // Bind the port FIRST so the host (Render) detects an open port immediately,
 // then initialize the database. If init were awaited before listen, a slow or
 // hanging DB connection would prevent the port from ever opening.
+// Keep trying to initialise the schema/seed until the database is reachable, so
+// that when a paused database is restored the app self-heals without a restart.
+async function initWithRetry() {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await init();
+      console.log('✅ Database initialized');
+      return;
+    } catch (err) {
+      if (!isDbDown(err)) { console.error('❌ Database init failed:', err.message); return; }
+      const wait = Math.min(60, attempt * 10); // back off up to 60s
+      throttledWarn(`⚠️  Database not reachable yet (attempt ${attempt}); retrying every ${wait}s once it is back.`);
+      await new Promise(r => setTimeout(r, wait * 1000));
+    }
+  }
+}
+
 app.listen(PORT, () => {
   console.log(`✅ Attendance server listening on port ${PORT}`);
-  init()
-    .then(() => console.log('✅ Database initialized'))
-    .catch(err => console.error('❌ Database init failed:', err.message));
+  initWithRetry();
 });
